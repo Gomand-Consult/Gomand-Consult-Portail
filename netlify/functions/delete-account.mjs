@@ -83,8 +83,6 @@ export async function handle(req, sb) {
   return json(400, { error: 'Action inconnue.' });
 }
 
-export const config = { path: '/api/delete-account' };
-
 export default async (req) => {
   let sb;
   try { sb = serviceClient(); } catch (e) { console.error(e.message); return json(500, { error: `Le serveur n’est pas configuré. ${e.message}.` }); }
