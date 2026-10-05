@@ -41,28 +41,30 @@ export const listClients = async () =>
 export const listProfiles = async (clientId) =>
   ok(await supabase.from('profiles').select('id, full_name, email, created_at').eq('client_id', clientId).order('created_at'));
 
-export async function inviteClient(payload) {
+// Appel d'une fonction serveur. Ne réussit que si le serveur répond en JSON ET confirme le succès :
+// si l'adresse n'est pas branchée sur la fonction, Netlify renverrait la page d'accueil (code 200), ce qui ne doit
+// jamais passer pour un succès, surtout pour une suppression.
+export async function callApi(path, payload, failMessage) {
   const { data: { session } } = await supabase.auth.getSession();
-  const res = await fetch('/api/invite-client', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', authorization: `Bearer ${session?.access_token}` },
-    body: JSON.stringify(payload),
-  });
+  let res;
+  try {
+    res = await fetch(path, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${session?.access_token}` },
+      body: JSON.stringify(payload),
+    });
+  } catch { throw new Error('Le serveur ne répond pas. Vérifiez votre connexion et réessayez.'); }
+  const isJson = (res.headers.get('content-type') || '').includes('application/json');
+  if (!isJson) throw new Error('Réponse inattendue du serveur : la fonction n’est pas disponible. Rien n’a été modifié.');
   const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(body.error || 'L’invitation a échoué.');
+  if (!res.ok) throw new Error(body.error || failMessage);
+  if (body.ok !== true) throw new Error(failMessage);
   return body;
 }
 
-export async function deleteAccount(payload) {
-  const { data: { session } } = await supabase.auth.getSession();
-  const res = await fetch('/api/delete-account', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', authorization: `Bearer ${session?.access_token}` },
-    body: JSON.stringify(payload),
-  });
-  const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(body.error || 'La suppression a échoué.');
-}
+export const inviteClient = (payload) => callApi('/api/invite-client', payload, 'L’invitation a échoué.');
+
+export const deleteAccount = (payload) => callApi('/api/delete-account', payload, 'La suppression a échoué.');
 export const deleteClient = (clientId, confirm) => deleteAccount({ action: 'client', id: clientId, confirm });
 export const removeUser = (userId) => deleteAccount({ action: 'user', id: userId });
 

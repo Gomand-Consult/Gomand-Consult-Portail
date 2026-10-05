@@ -17,6 +17,12 @@
   force = true
 
 [[redirects]]
+  from = "/api/delete-account"
+  to = "/.netlify/functions/delete-account"
+  status = 200
+  force = true
+
+[[redirects]]
   from = "/api/notify"
   to = "/.netlify/functions/notify"
   status = 200
