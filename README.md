@@ -117,7 +117,7 @@ Le guide complet est dans **`docs/RGPD.md`** (ce qui est fait, ce qu'il vous res
 - Netlify et Resend : les formules gratuites suffisent pour ce volume.
 
 ## Ce qui a été testé, et ce qui ne l'a pas été
-- **Testé automatiquement** : 64 vérifications de sécurité de la base sur un vrai PostgreSQL (`supabase/tests`), 31 tests (interface, géométrie des surlignages, fonction de suppression) et la compilation du site et des fonctions.
+- **Testé automatiquement** : 64 vérifications de sécurité de la base sur un vrai PostgreSQL (`supabase/tests`), 36 tests (interface, appels serveur, géométrie des surlignages, fonction de suppression) et la compilation du site et des fonctions.
 - **Non testé dans un vrai navigateur ni avec de vrais comptes Supabase, Resend, Netlify** : la lecture d'un PDF avec sélection de texte (la partie la plus délicate), l'envoi des emails, l'invitation d'un client, l'envoi de photos, l'affichage sur téléphone. Suivez la liste de l'étape 6 : si quelque chose cloche, c'est là que ça se verra.
 - **Limites connues** : un PDF « image » (scan) n'a pas de texte à sélectionner : utilisez « Commenter une page entière ». L'effet « flipbook » n'est pas inclus. Les liens signés expirent après une heure : rechargez la page si un document reste ouvert très longtemps.
 
