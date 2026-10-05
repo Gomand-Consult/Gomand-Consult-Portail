@@ -8,7 +8,7 @@ const clean = (v, max) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
 export default async (req) => {
   if (req.method !== 'POST') return json(405, { error: 'Méthode non autorisée.' });
   let sb;
-  try { sb = serviceClient(); } catch (e) { return json(500, { error: 'Le serveur n’est pas configuré.' }); }
+  try { sb = serviceClient(); } catch (e) { console.error(e.message); return json(500, { error: `Le serveur n’est pas configuré. ${e.message}.` }); }
 
   const me = await authenticate(req, sb);
   if (!me) return json(401, { error: 'Connexion requise.' });

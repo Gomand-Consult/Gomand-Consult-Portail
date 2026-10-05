@@ -17,6 +17,9 @@ export function env(name, fallback) {
 export function serviceClient() {
   return createClient(env('SUPABASE_URL', process.env.VITE_SUPABASE_URL), env('SUPABASE_SERVICE_ROLE_KEY'), {
     auth: { persistSession: false, autoRefreshToken: false },
+    // Sous Node 20 (pas de WebSocket natif), supabase-js refuse de démarrer, même si la fonction n'utilise pas le temps réel.
+    // On fournit donc un transport vide : il n'est jamais appelé ici.
+    realtime: { transport: class NoRealtime {} },
   });
 }
 
