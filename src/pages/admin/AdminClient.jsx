@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { getClient, listDocuments, listGalleries, listProfiles, createDocument, updateDocumentStatus, deleteDocument,
-  createGallery, deleteGallery, inviteClient, sendReset, notify } from '../../lib/api';
+  createGallery, deleteGallery, inviteClient, sendReset, notify, deleteClient, removeUser, exportClientData } from '../../lib/api';
 import { useToast } from '../../lib/toast';
 import { CATS, STATUS_PRESETS } from '../../config';
 import { fmtDate, plural } from '../../lib/format';
@@ -47,7 +47,7 @@ function DocumentForm({ clientId, onDone }) {
 
 function GalleryForm({ clientId, onDone }) {
   const toast = useToast();
-  const [f, setF] = useState({ title: '', note: '', notify: true });
+  const [f, setF] = useState({ title: '', note: '', notify: true, rights: false });
   const [files, setFiles] = useState([]);
   const [progress, setProgress] = useState(null);
   const [error, setError] = useState('');
@@ -55,12 +55,13 @@ function GalleryForm({ clientId, onDone }) {
     e.preventDefault(); setError('');
     if (!f.title.trim()) return setError('Indiquez un titre pour la galerie.');
     if (!files.length) return setError('Choisissez au moins une photo.');
+    if (!f.rights) return setError('Confirmez que vous avez le droit de partager ces photos.');
     setProgress([0, files.length]);
     try {
       const g = await createGallery({ clientId, title: f.title.trim(), note: f.note.trim(), files, onProgress: (a, b) => setProgress([a, b]) });
       if (f.notify) notify('gallery_published', g.id);
       toast(f.notify ? 'Galerie publiée. Le client est prévenu par email.' : 'Galerie publiée.');
-      setF({ ...f, title: '', note: '' }); setFiles([]); e.target.reset(); onDone();
+      setF({ ...f, title: '', note: '', rights: false }); setFiles([]); e.target.reset(); onDone();
     } catch (err) { setError(err.message); }
     setProgress(null);
   };
@@ -71,6 +72,7 @@ function GalleryForm({ clientId, onDone }) {
       <div className="field"><label htmlFor="g-files">Photos</label>
         <input id="g-files" type="file" accept="image/*" multiple onChange={(e) => setFiles(Array.from(e.target.files || []).filter((x) => x.type.startsWith('image/')).slice(0, 80))} />
         <span className="hint">{files.length ? plural(files.length, 'photo sélectionnée', 'photos sélectionnées') : 'Jusqu’à 80 photos. Elles sont allégées automatiquement avant l’envoi (2 400 px maximum).'}</span></div>
+      <label className="check"><input type="checkbox" checked={f.rights} onChange={(e) => setF({ ...f, rights: e.target.checked })} /> Je confirme que les personnes identifiables sur ces photos sont d’accord pour ce partage, ou qu’il n’y en a pas.</label>
       <label className="check"><input type="checkbox" checked={f.notify} onChange={(e) => setF({ ...f, notify: e.target.checked })} /> Prévenir le client par email</label>
       {progress && <div className="upload-progress" role="progressbar" aria-valuemin="0" aria-valuemax={progress[1]} aria-valuenow={progress[0]} aria-label="Envoi des photos"><span style={{ width: `${(progress[0] / progress[1]) * 100}%` }} /></div>}
       <ErrorBox>{error}</ErrorBox>
@@ -82,8 +84,12 @@ function GalleryForm({ clientId, onDone }) {
 export default function AdminClient() {
   const { id } = useParams();
   const toast = useToast();
+  const navigate = useNavigate();
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
+  const [confirmName, setConfirmName] = useState('');
+  const [deleteError, setDeleteError] = useState('');
+  const [deleting, setDeleting] = useState(false);
   const [contact, setContact] = useState({ full_name: '', email: '' });
   const [contactError, setContactError] = useState('');
 
@@ -106,6 +112,27 @@ export default function AdminClient() {
   const removeGal = async (g) => {
     if (!window.confirm(`Supprimer définitivement la galerie « ${g.title} » et ses photos ?`)) return;
     try { await deleteGallery(g); toast('Galerie supprimée.'); load(); } catch (e) { toast(e.message); }
+  };
+  const dropUser = async (p) => {
+    if (!window.confirm(`Retirer l’accès de ${p.full_name || p.email} ? Son compte et ses commentaires seront supprimés définitivement.`)) return;
+    try { await removeUser(p.id); toast('Accès supprimé.'); load(); } catch (e) { toast(e.message); }
+  };
+  const exportData = async () => {
+    try {
+      const payload = await exportClientData(id);
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `donnees-${(data.client.company || 'client').toLowerCase().replace(/[^a-z0-9]+/g, '-')}.json`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      toast('Export téléchargé.');
+    } catch (e) { toast(e.message); }
+  };
+  const eraseClient = async (e) => {
+    e.preventDefault(); setDeleteError(''); setDeleting(true);
+    try { await deleteClient(id, confirmName); toast('Client supprimé définitivement.'); navigate('/admin', { replace: true }); }
+    catch (err) { setDeleteError(err.message); setDeleting(false); }
   };
   const resend = async (p) => { await sendReset(p.email); toast(`Un lien a été envoyé à ${p.email}.`); };
   const addContact = async (e) => {
@@ -138,7 +165,10 @@ export default function AdminClient() {
             {people.map((p) => (
               <li className="user-row" key={p.id}>
                 <div><strong style={{ fontWeight: 600 }}>{p.full_name || 'Sans nom'}</strong><p className="muted">{p.email}</p></div>
-                <button className="btn btn-ghost btn-sm" onClick={() => resend(p)}>Renvoyer un lien de connexion</button>
+                <div className="doc-actions">
+                  <button className="btn btn-ghost btn-sm" onClick={() => resend(p)}>Renvoyer un lien de connexion</button>
+                  <button className="btn btn-ghost btn-sm" onClick={() => dropUser(p)}>Retirer l’accès</button>
+                </div>
               </li>
             ))}
           </ul>
@@ -199,6 +229,22 @@ export default function AdminClient() {
           )}
           <h3 style={{ margin: '40px 0 16px' }}>Créer une galerie photo</h3>
           <GalleryForm clientId={id} onDone={load} />
+        </section>
+
+        <section className="cat section" style={{ marginTop: 24 }}>
+          <h2 className="cat-title">Données et suppression</h2>
+          <p style={{ maxWidth: '60ch', marginBottom: 16 }}>Pour répondre à une demande d’accès ou de portabilité, exportez toutes les données de ce client. Les fichiers (PDF, photos) ne sont pas inclus : ils se récupèrent depuis leur lien.</p>
+          <p style={{ marginBottom: 40 }}><button className="btn btn-ghost" onClick={exportData}>Exporter les données (JSON)</button></p>
+          <form className="danger-zone" onSubmit={eraseClient} noValidate>
+            <h3>Supprimer ce client</h3>
+            <p>Supprime définitivement l’entreprise, ses accès de connexion, tous ses documents, ses photos et tous les échanges. Cette action ne peut pas être annulée.</p>
+            <div className="field">
+              <label htmlFor="confirm-name">Pour confirmer, retapez le nom de l’entreprise : <strong>{client.company}</strong></label>
+              <input id="confirm-name" value={confirmName} onChange={(e) => setConfirmName(e.target.value)} autoComplete="off" />
+            </div>
+            <ErrorBox>{deleteError}</ErrorBox>
+            <button className="btn btn-primary" type="submit" disabled={deleting || confirmName.trim().toLowerCase() !== client.company.trim().toLowerCase()}>{deleting ? 'Suppression…' : 'Supprimer définitivement'}</button>
+          </form>
         </section>
       </div>
     </Shell>

@@ -10,6 +10,9 @@ import SetPassword from './pages/SetPassword';
 import ClientDashboard, { ClientHome } from './pages/ClientDashboard';
 import DocumentViewer from './pages/DocumentViewer';
 import Gallery from './pages/Gallery';
+import Privacy from './pages/Privacy';
+import PrivacyGate from './pages/PrivacyGate';
+import { PRIVACY_VERSION } from './config';
 import AdminHome from './pages/admin/AdminHome';
 import AdminClient from './pages/admin/AdminClient';
 
@@ -31,6 +34,8 @@ function Guard({ role, children }) {
   if (!session) return <Navigate to="/connexion" replace state={{ from: location.pathname + location.search }} />;
   if (!profile) return <NoAccess kind={profileError} />;
   if (role && profile.role !== role) return <Navigate to={profile.role === 'admin' ? '/admin' : '/'} replace />;
+  // Chaque client prend connaissance de la politique de confidentialité avant d'accéder à son espace.
+  if (profile.role === 'client' && profile.privacy_version !== PRIVACY_VERSION) return <PrivacyGate />;
   return children;
 }
 
@@ -59,6 +64,7 @@ export default function App() {
             <Route path="/connexion" element={<Login />} />
             <Route path="/mot-de-passe-oublie" element={<ForgotPassword />} />
             <Route path="/definir-mot-de-passe" element={<SetPassword />} />
+            <Route path="/confidentialite" element={<Privacy />} />
             <Route path="/" element={<Guard role="client"><ClientHome /></Guard>} />
             <Route path="/documents/:id" element={<Guard><DocumentViewer /></Guard>} />
             <Route path="/galeries/:id" element={<Guard><Gallery /></Guard>} />

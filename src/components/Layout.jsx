@@ -47,8 +47,28 @@ export function Footer() {
       <div className="container">
         <Logos />
         <p>Espace client sécurisé de Gomand Consult SRL, Walhain (Belgique).</p>
+        <p><Link to="/confidentialite" style={{ textDecoration: 'underline', textUnderlineOffset: 3 }}>Politique de confidentialité</Link></p>
       </div>
     </footer>
+  );
+}
+
+// Coque des pages accessibles sans connexion (politique de confidentialité).
+export function PublicShell({ children }) {
+  const { session, profile } = useAuth();
+  const home = session && profile ? (profile.role === 'admin' ? '/admin' : '/') : '/connexion';
+  return (
+    <>
+      <header className="site-header">
+        <div className="container">
+          <Link to={home} aria-label="Gomand Consult, accueil"><Logos /></Link>
+          <nav className="nav-desktop" aria-label="Navigation principale"><Link to={home}>{session && profile ? 'Mon espace' : 'Connexion'}</Link></nav>
+          <div className="who"><Link className="btn btn-ghost btn-sm" to={home}>{session && profile ? 'Retour à mon espace' : 'Retour à la connexion'}</Link></div>
+        </div>
+      </header>
+      <main>{children}</main>
+      <Footer />
+    </>
   );
 }
 

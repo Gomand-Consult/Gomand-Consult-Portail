@@ -63,6 +63,7 @@ export default function Login() {
         <Link className="link-quiet" to="/mot-de-passe-oublie">Mot de passe oublié</Link>
       </form>
       <p className="login-note">Votre accès a été créé par Anthony et vous a été envoyé par email. Il n’y a pas d’inscription libre.</p>
+      <p className="login-note" style={{ marginTop: 12, paddingTop: 0, border: 'none' }}>Cet espace n’utilise aucun cookie publicitaire ni outil de suivi, seulement le stockage technique nécessaire à votre connexion. <Link className="link-quiet" style={{ marginTop: 0 }} to="/confidentialite">Politique de confidentialité</Link></p>
     </AuthFrame>
   );
 }

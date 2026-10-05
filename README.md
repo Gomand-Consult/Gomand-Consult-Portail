@@ -31,8 +31,9 @@ Les intitulés des menus peuvent légèrement varier chez les fournisseurs.
    Le fichier `.gitignore` empêche d'envoyer les secrets (`.env`).
 
 ### 2. Supabase
-1. Créez un projet. **Région : Central EU (Frankfurt)**. Notez le mot de passe de la base dans votre gestionnaire de mots de passe.
+1. Créez un projet. **Région : une région de l'Union européenne** (Francfort ou Irlande). Notez le mot de passe de la base dans votre gestionnaire de mots de passe.
 2. **SQL Editor** → nouvelle requête → collez tout le contenu de `supabase/schema.sql` → *Run*. Cela crée les tables, les règles de sécurité et les deux espaces de stockage privés (`documents`, `photos`).
+   *Vous aviez déjà installé la première version ?* Exécutez seulement `supabase/migrations/002_rgpd.sql` (elle ajoute l'accusé de réception de la politique de confidentialité, sans toucher aux données existantes).
 3. **Authentication → Sign In / Providers** :
    - **désactivez « Allow new users to sign up »** (il ne doit pas y avoir d'inscription libre : c'est Anthony qui invite) ;
    - laissez « Confirm email » activé ;
@@ -64,6 +65,7 @@ Les intitulés des menus peuvent légèrement varier chez les fournisseurs.
    |---|---|---|
    | `VITE_SUPABASE_URL` | URL du projet | publique |
    | `VITE_SUPABASE_ANON_KEY` | clé anon | publique |
+   | `SUPABASE_URL` | URL du projet (la même que ci-dessus) | lue par les fonctions serveur |
    | `SUPABASE_SERVICE_ROLE_KEY` | clé service_role | **secrète** : cochez « Contains secret values » |
    | `RESEND_API_KEY` | clé Resend | **secrète** |
    | `MAIL_FROM` | `Gomand Consult <portail@gomandconsult.com>` | |
@@ -85,6 +87,9 @@ Dans GitHub : *Settings → Secrets and variables → Actions*, créez `SUPABASE
 
 ---
 
+## Si « Le serveur n'est pas configuré » s'affiche
+Le message nomme maintenant la variable manquante. Vérifiez dans Netlify (*Site configuration → Environment variables*) que le nom est **exactement** `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_URL` (ou `VITE_SUPABASE_URL`), `RESEND_API_KEY`, `MAIL_FROM`, `ADMIN_EMAIL`, que la portée est « All scopes », puis relancez un déploiement. Les journaux des fonctions se trouvent dans *Logs → Functions*. Si le message mentionne « native WebSocket », mettez à jour les fichiers `netlify/lib/common.mjs` et `netlify.toml` (la fonction doit fonctionner sous Node 20 comme sous Node 22).
+
 ## Utilisation au quotidien
 - **Nouveau client** : back-office → *Inviter un nouveau client* (entreprise, contact, email). Il reçoit un lien pour choisir son mot de passe.
 - **Autre personne chez le même client** : fiche client → *Accès* → donner accès à une autre personne.
@@ -92,9 +97,14 @@ Dans GitHub : *Settings → Secrets and variables → Actions*, créez `SUPABASE
 - **Photos** : fiche client → *Créer une galerie photo*. Les photos sont allégées automatiquement (2 400 px maximum) avant l'envoi. Les fichiers d'origine restent chez vous.
 - **Réponses** : l'écran d'accueil du back-office liste ce qui attend votre réponse. Un client qui oublie son mot de passe utilise « Mot de passe oublié » ; vous pouvez aussi lui renvoyer un lien depuis sa fiche.
 - **Aperçu** : « Voir l'espace comme le client » montre exactement ce que le client voit.
+- **Données d'un client (accès, portabilité)** : fiche client → *Données et suppression* → « Exporter les données (JSON) ».
+- **Supprimer un client** : même section → retapez le nom de l'entreprise → « Supprimer définitivement ». Fichiers, accès, documents, photos et échanges sont effacés ; c'est irréversible. « Retirer l'accès » (dans *Accès*) supprime une seule personne.
 
 ## Sécurité et RGPD
-- **Cloisonnement** : toutes les règles sont dans la base (pas seulement dans l'interface). Un client ne peut ni lire, ni modifier, ni deviner les données d'un autre, même en interrogeant directement l'API. 54 vérifications automatiques le contrôlent (voir `supabase/tests`).
+Le guide complet est dans **`docs/RGPD.md`** (ce qui est fait, ce qu'il vous reste à faire, registre des traitements, procédures). En bref :
+- **Politique de confidentialité** publique sur `/confidentialite`, liée depuis le pied de page, la page de connexion et les emails. Chaque client la voit une fois avant d'entrer (« J'ai pris connaissance »), avec date et version enregistrées.
+- **Pas de bandeau de cookies** : le portail n'utilise que le stockage technique indispensable à la connexion, exempté de consentement.
+- **Cloisonnement** : toutes les règles sont dans la base (pas seulement dans l'interface). Un client ne peut ni lire, ni modifier, ni deviner les données d'un autre, même en interrogeant directement l'API. 64 vérifications automatiques le contrôlent (voir `supabase/tests`).
 - **Fichiers** : privés. Accès par liens signés qui expirent au bout d'une heure ; les dossiers sont séparés par client.
 - **Auteur des messages** : déterminé par le serveur, jamais par le navigateur : impossible de se faire passer pour Anthony.
 - **Emails** : ils ne contiennent jamais le texte des échanges, seulement un lien pour se connecter.
@@ -107,7 +117,7 @@ Dans GitHub : *Settings → Secrets and variables → Actions*, créez `SUPABASE
 - Netlify et Resend : les formules gratuites suffisent pour ce volume.
 
 ## Ce qui a été testé, et ce qui ne l'a pas été
-- **Testé automatiquement** : 54 vérifications de sécurité de la base sur un vrai PostgreSQL (`supabase/tests`), 16 tests de l'interface (connexion, espace client, galerie, lecture d'un document, back-office) et la compilation du site et des fonctions.
+- **Testé automatiquement** : 64 vérifications de sécurité de la base sur un vrai PostgreSQL (`supabase/tests`), 31 tests (interface, géométrie des surlignages, fonction de suppression) et la compilation du site et des fonctions.
 - **Non testé dans un vrai navigateur ni avec de vrais comptes Supabase, Resend, Netlify** : la lecture d'un PDF avec sélection de texte (la partie la plus délicate), l'envoi des emails, l'invitation d'un client, l'envoi de photos, l'affichage sur téléphone. Suivez la liste de l'étape 6 : si quelque chose cloche, c'est là que ça se verra.
 - **Limites connues** : un PDF « image » (scan) n'a pas de texte à sélectionner : utilisez « Commenter une page entière ». L'effet « flipbook » n'est pas inclus. Les liens signés expirent après une heure : rechargez la page si un document reste ouvert très longtemps.
 
@@ -127,7 +137,9 @@ Tests de sécurité de la base (nécessite PostgreSQL) : créez une base vide, e
 supabase/schema.sql          tables, sécurité, stockage (à exécuter une fois)
 supabase/email-templates/    emails d'invitation et de réinitialisation, en français
 supabase/tests/              tests de sécurité de la base
-netlify/functions/           invite-client (créer un accès) et notify (emails)
+netlify/functions/           invite-client (créer un accès), delete-account (supprimer un client ou un accès) et notify (emails)
+docs/RGPD.md                 conformité RGPD : checklist, registre, procédures
+supabase/migrations/         mises à jour de la base pour une installation existante
 src/pages/                   écrans (connexion, espace client, document, galerie, back-office)
 src/components/PdfViewer.jsx lecteur PDF (pdf.js) avec surlignages
 src/lib/api.js               tout ce qui parle à Supabase

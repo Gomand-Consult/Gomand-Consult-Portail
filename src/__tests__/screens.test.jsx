@@ -2,11 +2,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
-const state = vi.hoisted(() => ({ profile: null, anonymous: false }));
+const state = vi.hoisted(() => ({ profile: null, anonymous: false, refresh: () => {} }));
 vi.mock('../lib/auth', () => ({
   useAuth: () => (state.anonymous
     ? { loading: false, session: null, profile: null, profileError: null }
-    : { loading: false, session: { user: { id: 'u1' } }, profile: state.profile, profileError: null }),
+    : { loading: false, session: { user: { id: 'u1' } }, profile: state.profile, profileError: null, refresh: state.refresh }),
   AuthProvider: ({ children }) => children,
 }));
 vi.mock('../supabase', () => ({ supabase: {}, configured: true, initialUrlType: null, initialUrlError: null }));
@@ -18,6 +18,8 @@ vi.mock('../lib/api', () => ({
   getGallery: vi.fn(), listPhotos: vi.fn(), signedUrls: vi.fn(), setDecision: vi.fn(), addPhotoMessage: vi.fn(),
   sendSelection: vi.fn(), markGalleryViewed: vi.fn(), markGallerySeen: vi.fn(),
   adminPending: vi.fn(), listClients: vi.fn(), inviteClient: vi.fn(),
+  acceptPrivacy: vi.fn(), deleteClient: vi.fn(), removeUser: vi.fn(), exportClientData: vi.fn(), listProfiles: vi.fn(),
+  createDocument: vi.fn(), updateDocumentStatus: vi.fn(), deleteDocument: vi.fn(), createGallery: vi.fn(), deleteGallery: vi.fn(),
 }));
 vi.mock('../components/PdfViewer', () => ({ default: ({ annotations }) => <div data-testid="pdf">{annotations.length} annotations</div> }));
 
@@ -28,12 +30,16 @@ import ClientDashboard from '../pages/ClientDashboard';
 import Gallery from '../pages/Gallery';
 import DocumentViewer from '../pages/DocumentViewer';
 import AdminHome from '../pages/admin/AdminHome';
+import AdminClient from '../pages/admin/AdminClient';
+import Privacy from '../pages/Privacy';
+import PrivacyGate from '../pages/PrivacyGate';
+import { PRIVACY_VERSION } from '../config';
 
 const client = { id: 'c1', company: 'Maison Lambert', contact_name: 'Claire Dubois', project_title: 'Plan marketing 2027' };
 const wrap = (ui, path, route) => render(
   <MemoryRouter initialEntries={[path]}><ToastProvider><Routes><Route path={route} element={ui} /></Routes></ToastProvider></MemoryRouter>,
 );
-beforeEach(() => { vi.clearAllMocks(); state.anonymous = false; state.profile = { id: 'u1', role: 'client', client_id: 'c1', full_name: 'Claire Dubois' }; });
+beforeEach(() => { vi.clearAllMocks(); state.refresh = vi.fn(); state.anonymous = false; state.profile = { id: 'u1', role: 'client', client_id: 'c1', full_name: 'Claire Dubois' }; });
 
 describe('Connexion', () => {
   it('affiche l’erreur renvoyée par le serveur', async () => {
@@ -165,5 +171,90 @@ describe('Back-office', () => {
     expect(screen.getByRole('link', { name: 'Répondre' }).getAttribute('href')).toBe('/documents/d1?thread=t1');
     expect(screen.getByRole('link', { name: 'Voir la sélection' }).getAttribute('href')).toBe('/galeries/g1');
     expect(screen.getByText('3 documents, 1 galerie')).toBeInTheDocument();
+  });
+});
+
+describe('Politique de confidentialité', () => {
+  it('est lisible sans connexion et annonce l’absence de cookies publicitaires', () => {
+    state.anonymous = true;
+    wrap(<Privacy />, '/confidentialite', '/confidentialite');
+    expect(screen.getByRole('heading', { level: 1, name: 'Politique de confidentialité' })).toBeInTheDocument();
+    for (const h of ['Qui est responsable de vos données', 'Quelles données', 'Pourquoi', 'Qui reçoit', 'Combien de temps', 'Cookies', 'Vos droits', 'Sécurité']) {
+      expect(screen.getByRole('heading', { level: 2, name: new RegExp(h) })).toBeInTheDocument();
+    }
+    expect(screen.getByText(/aucun cookie publicitaire/)).toBeInTheDocument();
+    expect(screen.getAllByRole('link', { name: 'hello@gomandconsult.com' })[0].getAttribute('href')).toBe('mailto:hello@gomandconsult.com');
+    expect(screen.getByText(/Irlande/)).toBeInTheDocument();
+    expect(screen.getAllByRole('link', { name: 'Retour à la connexion' }).length).toBeGreaterThan(0);
+  });
+});
+
+describe('Accusé de réception de la politique', () => {
+  it('bloque le bouton tant que la case n’est pas cochée, puis enregistre la version', async () => {
+    api.acceptPrivacy.mockResolvedValue(null);
+    wrap(<PrivacyGate />, '/', '/');
+    const go = screen.getByRole('button', { name: 'Continuer' });
+    expect(go).toBeDisabled();
+    fireEvent.click(screen.getByLabelText(/J’ai pris connaissance/));
+    expect(go).toBeEnabled();
+    fireEvent.click(go);
+    await waitFor(() => expect(api.acceptPrivacy).toHaveBeenCalledWith(PRIVACY_VERSION));
+    await waitFor(() => expect(state.refresh).toHaveBeenCalled());
+  });
+  it('affiche une erreur claire si l’enregistrement échoue', async () => {
+    api.acceptPrivacy.mockRejectedValue(new Error('x'));
+    wrap(<PrivacyGate />, '/', '/');
+    fireEvent.click(screen.getByLabelText(/J’ai pris connaissance/));
+    fireEvent.click(screen.getByRole('button', { name: 'Continuer' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('n’a pas pu être enregistré');
+  });
+});
+
+describe('Suppression d’un client (back-office)', () => {
+  const setupAdmin = () => {
+    state.profile = { id: 'a', role: 'admin', full_name: 'Anthony' };
+    api.getClient.mockResolvedValue(client);
+    api.listDocuments.mockResolvedValue([]); api.listGalleries.mockResolvedValue([]);
+    api.listProfiles.mockResolvedValue([{ id: 'p1', full_name: 'Claire Dubois', email: 'claire@lambert.be' }]);
+    wrap(<AdminClient />, '/admin/clients/c1', '/admin/clients/:id');
+  };
+  it('exige le nom exact de l’entreprise avant d’activer la suppression', async () => {
+    setupAdmin(); api.deleteClient.mockResolvedValue(null);
+    await screen.findByRole('heading', { name: 'Maison Lambert' });
+    const button = screen.getByRole('button', { name: 'Supprimer définitivement' });
+    expect(button).toBeDisabled();
+    fireEvent.change(screen.getByLabelText(/retapez le nom/), { target: { value: 'maison' } });
+    expect(button).toBeDisabled();
+    fireEvent.change(screen.getByLabelText(/retapez le nom/), { target: { value: 'maison lambert' } });
+    expect(button).toBeEnabled();
+    fireEvent.click(button);
+    await waitFor(() => expect(api.deleteClient).toHaveBeenCalledWith('c1', 'maison lambert'));
+  });
+  it('affiche l’erreur du serveur si la suppression échoue', async () => {
+    setupAdmin(); api.deleteClient.mockRejectedValue(new Error('La suppression n’a pas pu aller jusqu’au bout.'));
+    await screen.findByRole('heading', { name: 'Maison Lambert' });
+    fireEvent.change(screen.getByLabelText(/retapez le nom/), { target: { value: 'Maison Lambert' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Supprimer définitivement' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('pas pu aller jusqu’au bout');
+  });
+  it('retire l’accès d’un contact après confirmation', async () => {
+    setupAdmin(); api.removeUser.mockResolvedValue(null);
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    await screen.findByText('claire@lambert.be');
+    fireEvent.click(screen.getByRole('button', { name: 'Retirer l’accès' }));
+    await waitFor(() => expect(api.removeUser).toHaveBeenCalledWith('p1'));
+  });
+  it('ne supprime rien si la confirmation est refusée', async () => {
+    setupAdmin(); vi.spyOn(window, 'confirm').mockReturnValue(false);
+    await screen.findByText('claire@lambert.be');
+    fireEvent.click(screen.getByRole('button', { name: 'Retirer l’accès' }));
+    expect(api.removeUser).not.toHaveBeenCalled();
+  });
+  it('propose l’export des données', async () => {
+    setupAdmin(); api.exportClientData.mockResolvedValue({ client });
+    URL.createObjectURL = vi.fn(() => 'blob:x'); URL.revokeObjectURL = vi.fn();
+    await screen.findByRole('heading', { name: 'Maison Lambert' });
+    fireEvent.click(screen.getByRole('button', { name: 'Exporter les données (JSON)' }));
+    await waitFor(() => expect(api.exportClientData).toHaveBeenCalledWith('c1'));
   });
 });

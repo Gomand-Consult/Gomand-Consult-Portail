@@ -24,6 +24,8 @@ create table public.profiles (
   full_name  text check (char_length(full_name) <= 200),
   email      text,
   created_at timestamptz not null default now(),
+  privacy_accepted_at timestamptz,
+  privacy_version     text,
   constraint profiles_role_client check (
     (role = 'admin' and client_id is null) or (role = 'client' and client_id is not null)
   )
@@ -298,6 +300,15 @@ begin
   if not found then raise exception 'Galerie introuvable'; end if;
 end $$;
 
+-- Enregistre que la personne a pris connaissance de la politique de confidentialité (version et date).
+create function public.accept_privacy(p_version text) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  if p_version is null or char_length(p_version) not between 1 and 40 then raise exception 'Version invalide'; end if;
+  update public.profiles set privacy_accepted_at = now(), privacy_version = p_version where id = auth.uid();
+  if not found then raise exception 'Profil introuvable'; end if;
+end $$;
+
 -- Liste « À traiter » du back-office (vide pour toute personne qui n'est pas admin).
 create function public.admin_pending()
 returns table (kind text, ref_id uuid, parent_id uuid, client_id uuid, title text, happened_at timestamptz, excerpt text)
@@ -330,7 +341,7 @@ grant execute on function public.is_admin(), public.my_client_id(), public.can_a
   public.can_access_document(uuid), public.can_access_annotation(uuid), public.can_access_gallery(uuid),
   public.can_access_photo(uuid),
   public.mark_document_viewed(uuid), public.mark_gallery_viewed(uuid), public.set_photo_decision(uuid, text),
-  public.send_gallery_selection(uuid), public.admin_pending() to authenticated;
+  public.send_gallery_selection(uuid), public.accept_privacy(text), public.admin_pending() to authenticated;
 grant execute on function public.ping() to anon, authenticated;
 
 -- ---------------------------------------------------------------- Stockage ----

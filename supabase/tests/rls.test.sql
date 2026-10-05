@@ -106,6 +106,12 @@ select public.mark_document_viewed('00000000-0000-0000-0000-0000000000d1');
 select t.eq('document marqué vu', (select count(*) from public.documents where first_viewed_at is not null), 1);
 select t.eq('client1 n''a rien à traiter côté admin', (select count(*) from public.admin_pending()), 0);
 
+-- 4b. Accusé de réception de la politique de confidentialité
+select t.fails('version vide refusée', $$select public.accept_privacy('')$$);
+select public.accept_privacy('2026-10-05');
+select t.eq('client1 accuse réception (sa ligne uniquement)', (select count(*) from public.profiles where privacy_version = '2026-10-05'), 1);
+select t.fails('client1 ne peut pas écrire la date lui-même', $$update public.profiles set privacy_accepted_at = now()$$);
+
 -- 5. Le client 2 ne voit rien du client 1
 select t.as_super();
 select t.as_user('00000000-0000-0000-0000-0000000000b2');
@@ -133,6 +139,18 @@ select t.eq('admin : sélection vue, plus rien à traiter', (select count(*) fro
 insert into public.documents (client_id, category, title, storage_path) values ('00000000-0000-0000-0000-0000000000c2','factures','Facture','c2/f.pdf');
 select t.eq('admin peut ajouter un document', (select count(*) from public.documents), 3);
 select t.eq('admin supprime une annotation d''un client', t.affected($$delete from public.annotations$$), 1);
+
+-- 6b. Suppressions en cascade (effacement d'un contact, puis d'un client entier)
+select t.as_super();
+select t.eq('avant : 2 messages de photo existent', (select count(*) from public.photo_messages), 2);
+delete from auth.users where id = '00000000-0000-0000-0000-0000000000b1';
+select t.eq('effacer un contact supprime son profil', (select count(*) from public.profiles where id = '00000000-0000-0000-0000-0000000000b1'), 0);
+select t.eq('effacer un contact supprime ses commentaires de photo', (select count(*) from public.photo_messages where author_role = 'client'), 0);
+select t.eq('effacer un contact supprime aussi ses messages sur les documents', (select count(*) from public.annotation_messages where author_role = 'client'), 0);
+delete from public.clients where id = '00000000-0000-0000-0000-0000000000c2';
+select t.eq('effacer un client supprime ses documents', (select count(*) from public.documents where client_id = '00000000-0000-0000-0000-0000000000c2'), 0);
+select t.eq('effacer un client supprime ses galeries et photos', (select count(*) from public.galleries where client_id = '00000000-0000-0000-0000-0000000000c2') + (select count(*) from public.photos where id = '00000000-0000-0000-0000-0000000000f2'), 0);
+select t.eq('effacer un client supprime ses profils', (select count(*) from public.profiles where client_id = '00000000-0000-0000-0000-0000000000c2'), 0);
 
 -- 7. Anonyme : rien
 select t.as_super();

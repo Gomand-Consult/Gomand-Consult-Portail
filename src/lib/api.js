@@ -31,6 +31,7 @@ export async function updatePassword(password) {
     throw new Error('Le mot de passe n’a pas pu être enregistré.');
   }
 }
+export const acceptPrivacy = async (version) => ok(await supabase.rpc('accept_privacy', { p_version: version }));
 export const fetchProfile = async (uid) => ok(await supabase.from('profiles').select('*').eq('id', uid).maybeSingle());
 
 // -------------------------------------------------------------- Clients ----
@@ -50,6 +51,30 @@ export async function inviteClient(payload) {
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body.error || 'L’invitation a échoué.');
   return body;
+}
+
+export async function deleteAccount(payload) {
+  const { data: { session } } = await supabase.auth.getSession();
+  const res = await fetch('/api/delete-account', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${session?.access_token}` },
+    body: JSON.stringify(payload),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || 'La suppression a échoué.');
+}
+export const deleteClient = (clientId, confirm) => deleteAccount({ action: 'client', id: clientId, confirm });
+export const removeUser = (userId) => deleteAccount({ action: 'user', id: userId });
+
+// Copie complète des données d'un client (droit d'accès et de portabilité). Les fichiers eux-mêmes ne sont pas inclus.
+export async function exportClientData(clientId) {
+  const [client, people, documents, galleries] = await Promise.all([
+    supabase.from('clients').select('*').eq('id', clientId).maybeSingle().then(ok),
+    supabase.from('profiles').select('full_name, email, created_at, privacy_accepted_at, privacy_version').eq('client_id', clientId).then(ok),
+    supabase.from('documents').select('*, annotations(*, annotation_messages(*))').eq('client_id', clientId).then(ok),
+    supabase.from('galleries').select('*, photos(*, photo_messages(*))').eq('client_id', clientId).then(ok),
+  ]);
+  return { exported_at: new Date().toISOString(), client, people, documents, galleries };
 }
 
 // ------------------------------------------------------------ Documents ----

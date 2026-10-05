@@ -39,6 +39,7 @@ export const esc = (s) =>
   String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 export function emailHtml({ title, intro, cta, url }) {
+  const privacyUrl = `${siteUrl()}/confidentialite`;
   return `<!doctype html><html lang="fr"><body style="margin:0;background:#F1F3F5;font-family:Montserrat,Arial,sans-serif;color:#252A2B">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:32px 16px">
 <table role="presentation" width="560" cellpadding="0" cellspacing="0" style="max-width:560px;background:#FFFFFF;border:1px solid #D6DCDF;border-radius:10px">
@@ -46,7 +47,7 @@ export function emailHtml({ title, intro, cta, url }) {
 <tr><td style="padding:0 32px"><h1 style="margin:12px 0 16px;font-size:22px;line-height:1.25;font-weight:600">${esc(title)}</h1>
 <p style="margin:0 0 24px;font-size:15px;line-height:1.6;color:#4E6469">${esc(intro)}</p>
 <p style="margin:0 0 32px"><a href="${esc(url)}" style="display:inline-block;background:#324A59;color:#FFFFFF;text-decoration:none;font-weight:600;font-size:15px;padding:13px 26px;border-radius:10px">${esc(cta)}</a></p></td></tr>
-<tr><td style="padding:0 32px 28px"><p style="margin:0;font-size:12px;line-height:1.5;color:#536770;border-top:1px solid #D6DCDF;padding-top:16px">Vous recevez ce message car vous avez un espace client chez Gomand Consult. Pour votre sécurité, le contenu de vos échanges n'est jamais envoyé par email : connectez-vous pour le consulter.</p></td></tr>
+<tr><td style="padding:0 32px 28px"><p style="margin:0;font-size:12px;line-height:1.5;color:#536770;border-top:1px solid #D6DCDF;padding-top:16px">Vous recevez ce message car vous avez un espace client chez Gomand Consult. Pour votre sécurité, le contenu de vos échanges n'est jamais envoyé par email : connectez-vous pour le consulter. <a href="${esc(privacyUrl)}" style="color:#324A59">Politique de confidentialité</a></p></td></tr>
 </table></td></tr></table></body></html>`;
 }
 
@@ -64,7 +65,7 @@ export async function sendEmail({ to, subject, title, intro, cta, url }) {
       to: recipients,
       subject,
       html: emailHtml({ title, intro, cta, url }),
-      text: `${title}\n\n${intro}\n\n${cta} : ${url}`,
+      text: `${title}\n\n${intro}\n\n${cta} : ${url}\n\nPolitique de confidentialité : ${siteUrl()}/confidentialite`,
     }),
   });
   if (!res.ok) return { sent: false, reason: `Resend a répondu ${res.status}` };
