@@ -1,7 +1,7 @@
 // Toutes les communications avec Supabase passent par ce fichier.
 import { supabase } from '../supabase';
 import { resizeToJpeg } from './images';
-import { MAX_PDF_MB } from '../config';
+import { MAX_PDF_MB, MAX_HTML_MB } from '../config';
 
 const ok = ({ data, error }) => {
   if (error) throw new Error(error.message || 'Une erreur est survenue.');
@@ -90,15 +90,34 @@ export async function documentUrl(path, downloadAs) {
   if (error) throw new Error('Le document est momentanément inaccessible.');
   return data.signedUrl;
 }
+// Un document est soit un PDF, soit une page HTML autonome (reconnue à l'extension du fichier stocké).
+export const isHtmlDoc = (doc) => /\.html?$/i.test(doc?.storage_path || '');
+// Le fichier HTML est lu en texte (Supabase ne le sert pas comme une page web) puis affiché dans un cadre isolé.
+export async function documentHtml(path) {
+  const url = await documentUrl(path);
+  let res;
+  try { res = await fetch(url); } catch { throw new Error('Le document est momentanément inaccessible.'); }
+  if (!res.ok) throw new Error('Le document est momentanément inaccessible.');
+  return res.text();
+}
 export const markDocumentViewed = (id) => supabase.rpc('mark_document_viewed', { p_doc: id });
 
 export async function createDocument({ clientId, category, title, reference, status, file }) {
-  if (file.type !== 'application/pdf') throw new Error('Le fichier doit être un PDF.');
-  if (file.size > MAX_PDF_MB * 1024 * 1024) throw new Error(`Le PDF dépasse ${MAX_PDF_MB} Mo.`);
-  const head = new TextDecoder().decode(await file.slice(0, 5).arrayBuffer());
-  if (!head.startsWith('%PDF')) throw new Error('Ce fichier n’est pas un PDF valide.');
-  const path = `${clientId}/${uuid()}.pdf`;
-  const up = await supabase.storage.from('documents').upload(path, file, { contentType: 'application/pdf', upsert: false });
+  const isHtml = file.type === 'text/html' || /\.html?$/i.test(file.name || '');
+  let ext = 'pdf', contentType = 'application/pdf';
+  if (isHtml) {
+    if (file.size > MAX_HTML_MB * 1024 * 1024) throw new Error(`La page HTML dépasse ${MAX_HTML_MB} Mo.`);
+    const head = (await file.slice(0, 2048).text()).toLowerCase();
+    if (!head.includes('<html') && !head.includes('<!doctype html') && !head.includes('<head') && !head.includes('<body')) throw new Error('Ce fichier ne ressemble pas à une page HTML.');
+    ext = 'html'; contentType = 'text/html';
+  } else {
+    if (file.type !== 'application/pdf') throw new Error('Le fichier doit être un PDF ou une page HTML.');
+    if (file.size > MAX_PDF_MB * 1024 * 1024) throw new Error(`Le PDF dépasse ${MAX_PDF_MB} Mo.`);
+    const head = new TextDecoder().decode(await file.slice(0, 5).arrayBuffer());
+    if (!head.startsWith('%PDF')) throw new Error('Ce fichier n’est pas un PDF valide.');
+  }
+  const path = `${clientId}/${uuid()}.${ext}`;
+  const up = await supabase.storage.from('documents').upload(path, file, { contentType, upsert: false });
   if (up.error) throw new Error('L’envoi du fichier a échoué.');
   const res = await supabase.from('documents').insert({
     client_id: clientId, category, title, reference: reference || null, status, storage_path: path, file_name: file.name,

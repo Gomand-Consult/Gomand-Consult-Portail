@@ -1,0 +1,1 @@
+import{t as e}from"./index-05Tm7wgT.js";var t=e();function n({html:e,title:n}){return(0,t.jsx)(`iframe`,{className:`html-frame`,title:n||`Document`,sandbox:`allow-popups allow-popups-to-escape-sandbox`,referrerPolicy:`no-referrer`,srcDoc:e})}export{n as default};

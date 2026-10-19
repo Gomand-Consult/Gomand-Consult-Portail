@@ -12,7 +12,7 @@ vi.mock('../lib/auth', () => ({
 vi.mock('../supabase', () => ({ supabase: {}, configured: true, initialUrlType: null, initialUrlError: null }));
 vi.mock('../lib/api', () => ({
   signOut: vi.fn(), signIn: vi.fn(), sendReset: vi.fn(),
-  getClient: vi.fn(), listDocuments: vi.fn(), listGalleries: vi.fn(), documentUrl: vi.fn(),
+  getClient: vi.fn(), listDocuments: vi.fn(), listGalleries: vi.fn(), documentUrl: vi.fn(), documentHtml: vi.fn(), isHtmlDoc: (d) => /\.html?$/i.test(d?.storage_path || ''),
   getDocument: vi.fn(), listThreads: vi.fn(), markDocumentViewed: vi.fn(), createHighlight: vi.fn(), createThread: vi.fn(),
   addMessage: vi.fn(), setThreadStatus: vi.fn(), deleteAnnotation: vi.fn(), notify: vi.fn(),
   getGallery: vi.fn(), listPhotos: vi.fn(), signedUrls: vi.fn(), setDecision: vi.fn(), addPhotoMessage: vi.fn(),
@@ -21,6 +21,7 @@ vi.mock('../lib/api', () => ({
   acceptPrivacy: vi.fn(), deleteClient: vi.fn(), removeUser: vi.fn(), exportClientData: vi.fn(), listProfiles: vi.fn(),
   createDocument: vi.fn(), updateDocumentStatus: vi.fn(), deleteDocument: vi.fn(), createGallery: vi.fn(), deleteGallery: vi.fn(),
 }));
+vi.mock('../components/HtmlViewer', () => ({ default: ({ html }) => <div data-testid="html">{html}</div> }));
 vi.mock('../components/PdfViewer', () => ({ default: ({ annotations }) => <div data-testid="pdf">{annotations.length} annotations</div> }));
 
 import * as api from '../lib/api';
@@ -155,6 +156,23 @@ describe('Lecture d’un document', () => {
     fireEvent.click(screen.getByRole('tab', { name: /Surlignages/ }));
     expect(screen.getByText('Surligné')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Retirer' })).toBeInTheDocument();
+  });
+
+  it('affiche une page HTML et permet de commenter le document entier', async () => {
+    api.getDocument.mockResolvedValue({ id: 'd2', client_id: 'c1', title: 'Audit en ligne', storage_path: 'c1/a.html', created_at: '2026-10-03T10:00:00Z', reference: null });
+    api.documentHtml.mockResolvedValue('<html><body>Bonjour</body></html>');
+    api.listThreads.mockResolvedValue([]);
+    api.createThread.mockResolvedValue({ annotation: { id: 't9', kind: 'comment', page: 1, status: 'open', quote: 'Document entier', created_at: '2026-10-03T10:00:00Z' },
+      message: { id: 'm9', body: 'Très clair', author_name: 'Claire Dubois', author_role: 'client', created_at: '2026-10-03T10:00:00Z' } });
+    wrap(<DocumentViewer />, '/documents/d2', '/documents/:id');
+    expect(await screen.findByTestId('html')).toHaveTextContent('Bonjour');
+    expect(api.documentUrl).not.toHaveBeenCalledWith('c1/a.html');
+    expect(screen.getByRole('button', { name: 'Télécharger le fichier' })).toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: /Surlignages/ })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Commenter le document' }));
+    fireEvent.change(screen.getByLabelText('Votre message'), { target: { value: 'Très clair' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Publier' }));
+    await waitFor(() => expect(api.createThread).toHaveBeenCalledWith(expect.objectContaining({ documentId: 'd2', quote: 'Document entier', body: 'Très clair' })));
   });
 });
 

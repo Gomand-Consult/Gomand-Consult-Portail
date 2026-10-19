@@ -38,3 +38,4 @@ export const RETENTION_MONTHS = 12;
 
 export const MIN_PASSWORD = 12;
 export const MAX_PDF_MB = 50;
+export const MAX_HTML_MB = 10; // une page HTML autonome (images et polices intégrées)

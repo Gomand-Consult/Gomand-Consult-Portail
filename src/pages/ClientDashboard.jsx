@@ -8,7 +8,7 @@ import { fmtDate, plural } from '../lib/format';
 import { Shell, Loading, ErrorBox, ContactBand, ARROW } from '../components/Layout';
 
 export async function triggerDownload(doc) {
-  const url = await documentUrl(doc.storage_path, doc.file_name || `${doc.title}.pdf`);
+  const url = await documentUrl(doc.storage_path, doc.file_name || `${doc.title}.${/\.html?$/i.test(doc.storage_path) ? 'html' : 'pdf'}`);
   const a = document.createElement('a');
   a.href = url; a.rel = 'noopener'; document.body.appendChild(a); a.click(); a.remove();
 }

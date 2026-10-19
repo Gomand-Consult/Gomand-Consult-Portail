@@ -2,13 +2,14 @@ import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } fro
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
 import { useToast } from '../lib/toast';
-import { getDocument, documentUrl, listThreads, createHighlight, createThread, addMessage, setThreadStatus, deleteAnnotation, markDocumentViewed, notify } from '../lib/api';
+import { getDocument, documentUrl, documentHtml, isHtmlDoc, listThreads, createHighlight, createThread, addMessage, setThreadStatus, deleteAnnotation, markDocumentViewed, notify } from '../lib/api';
 import { captureSelection } from '../lib/rects';
 import { fmtDate, fmtDateTime } from '../lib/format';
 import { Header, Loading, ErrorBox, ARROW_BACK } from '../components/Layout';
 import { triggerDownload } from './ClientDashboard';
 // Chargé à la demande : pdf.js est volumineux et inutile sur les autres écrans.
 const PdfViewer = lazy(() => import('../components/PdfViewer'));
+const HtmlViewer = lazy(() => import('../components/HtmlViewer'));
 
 const sortMsgs = (t) => (t.annotation_messages || []).slice().sort((a, b) => a.created_at.localeCompare(b.created_at));
 
@@ -22,6 +23,7 @@ export default function DocumentViewer() {
 
   const [doc, setDoc] = useState(null);
   const [url, setUrl] = useState('');
+  const [html, setHtml] = useState('');
   const [threads, setThreads] = useState([]);
   const [error, setError] = useState('');
   const [tab, setTab] = useState('open');
@@ -30,6 +32,7 @@ export default function DocumentViewer() {
   const [drafts, setDrafts] = useState({});
   const [sel, setSel] = useState(null);
   const pagesRef = useRef(null);
+  const isHtml = isHtmlDoc(doc);
 
   useEffect(() => {
     let alive = true;
@@ -37,9 +40,11 @@ export default function DocumentViewer() {
       try {
         const d = await getDocument(id);
         if (!d) throw new Error('Ce document est introuvable.');
-        const [u, t] = await Promise.all([documentUrl(d.storage_path), listThreads(id)]);
+        const asHtml = isHtmlDoc(d);
+        const [content, t] = await Promise.all([asHtml ? documentHtml(d.storage_path) : documentUrl(d.storage_path), listThreads(id)]);
         if (!alive) return;
-        setDoc(d); setUrl(u); setThreads(t);
+        setDoc(d); setThreads(t);
+        if (asHtml) setHtml(content); else setUrl(content);
         if (!isAdmin) markDocumentViewed(id);
       } catch (e) { if (alive) setError(e.message); }
     })();
@@ -98,7 +103,8 @@ export default function DocumentViewer() {
     setComposer({ page: sel.page, rects: sel.rects, quote: sel.quote, type: 'comment', text: '', error: '' });
     clearSelection();
   };
-  const startPageComment = () => setComposer({ page: 1, rects: [{ x: 0.06, y: 0.03, w: 0.5, h: 0.02 }], quote: 'Page entière', type: 'comment', text: '', error: '', pageLevel: true });
+  // Pour une page HTML, il n'y a pas de pages ni de sélection : le commentaire porte sur le document entier.
+  const startPageComment = () => setComposer({ page: 1, rects: [{ x: 0.06, y: 0.03, w: 0.5, h: 0.02 }], quote: isHtml ? 'Document entier' : 'Page entière', type: 'comment', text: '', error: '', pageLevel: true });
 
   const publish = async () => {
     const c = composer; const body = c.text.trim();
@@ -154,15 +160,17 @@ export default function DocumentViewer() {
             <h1>{doc.title}</h1>
             <p className="doc-meta">{doc.reference ? `Réf. Accountable ${doc.reference}, ` : ''}ajouté le {fmtDate(doc.created_at)}</p>
           </div>
-          <button className="btn btn-ghost btn-sm" onClick={() => triggerDownload(doc).catch((e) => toast(e.message))}>Télécharger le PDF</button>
+          <button className="btn btn-ghost btn-sm" onClick={() => triggerDownload(doc).catch((e) => toast(e.message))}>{isHtml ? 'Télécharger le fichier' : 'Télécharger le PDF'}</button>
         </div>
       </div>
 
       <div className="viewer">
         <div className="doc-area">
-          <p className="hint">Sélectionnez un passage pour le surligner ou y ajouter un commentaire.</p>
+          <p className="hint">{isHtml ? 'Lisez le document ici, puis utilisez « Commenter le document » dans le panneau de droite.' : 'Sélectionnez un passage pour le surligner ou y ajouter un commentaire.'}</p>
           <Suspense fallback={<Loading label="Chargement du lecteur…" />}>
-            <PdfViewer url={url} annotations={notes} activeId={active} onPin={focusThread} containerRef={pagesRef} />
+            {isHtml
+              ? <HtmlViewer html={html} title={doc.title} />
+              : <PdfViewer url={url} annotations={notes} activeId={active} onPin={focusThread} containerRef={pagesRef} />}
           </Suspense>
         </div>
 
@@ -172,15 +180,15 @@ export default function DocumentViewer() {
             <div className="tabs" role="tablist">
               {tabBtn('open', 'Ouverts', open.length)}
               {tabBtn('resolved', 'Résolus', resolved.length)}
-              {tabBtn('marks', 'Surlignages', highlights.length)}
+              {!isHtml && tabBtn('marks', 'Surlignages', highlights.length)}
             </div>
           </div>
 
           {composer && (
             <section className="composer" aria-label="Nouveau message">
-              <p className="composer-label">{composer.pageLevel ? 'Commentaire sur une page' : 'Passage commenté'}</p>
+              <p className="composer-label">{composer.pageLevel ? (isHtml ? 'Commentaire sur le document' : 'Commentaire sur une page') : 'Passage commenté'}</p>
               {composer.pageLevel
-                ? (<div className="field"><label htmlFor="cpage">Numéro de page</label>
+                ? (isHtml ? <blockquote>Document entier</blockquote> : <div className="field"><label htmlFor="cpage">Numéro de page</label>
                     <input id="cpage" type="number" min="1" value={composer.page} onChange={(e) => setComposer({ ...composer, page: Math.max(1, Number(e.target.value) || 1) })} /></div>)
                 : <blockquote>{composer.quote}</blockquote>}
               <fieldset className="type"><legend className="sr">Type de message</legend>
@@ -199,17 +207,17 @@ export default function DocumentViewer() {
           )}
 
           <div className="threads">
-            {!composer && <p style={{ margin: '14px 0 0' }}><button className="link-btn" onClick={startPageComment}>Commenter une page entière</button></p>}
+            {!composer && <p style={{ margin: '14px 0 0' }}><button className="link-btn" onClick={startPageComment}>{isHtml ? 'Commenter le document' : 'Commenter une page entière'}</button></p>}
 
             {tab !== 'marks' && list.length === 0 && (
-              <p className="empty">{tab === 'resolved' ? 'Aucun échange résolu pour l’instant.' : 'Aucun échange ouvert. Sélectionnez un passage du document pour en démarrer un.'}</p>
+              <p className="empty">{tab === 'resolved' ? 'Aucun échange résolu pour l’instant.' : `Aucun échange ouvert. ${isHtml ? 'Utilisez « Commenter le document » pour en démarrer un.' : 'Sélectionnez un passage du document pour en démarrer un.'}`}</p>
             )}
             {tab !== 'marks' && list.map((t) => (
               <section key={t.id} id={`th-${t.id}`} className={`thread${t.id === active ? ' active' : ''}`} onClick={() => t.id !== active && focusThread(t.id)}>
                 <div className="thread-head">
                   <span className={`pin ${t.status}`}>{t.n}</span>
                   <strong>{t.kind === 'question' ? 'Question' : 'Commentaire'}</strong>
-                  <span className="meta">Page {t.page}</span>
+                  <span className="meta">{isHtml ? 'Document' : `Page ${t.page}`}</span>
                   <span className={`status ${t.status}`}>{t.status === 'open' ? 'Ouvert' : 'Résolu'}</span>
                 </div>
                 <blockquote>{t.quote}</blockquote>

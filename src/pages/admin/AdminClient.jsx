@@ -17,7 +17,7 @@ function DocumentForm({ clientId, onDone }) {
   const submit = async (e) => {
     e.preventDefault(); setError('');
     if (!f.title.trim()) return setError('Indiquez un titre pour le document.');
-    if (!file) return setError('Choisissez le fichier PDF à publier.');
+    if (!file) return setError('Choisissez le fichier à publier (PDF ou page HTML).');
     setBusy(true);
     try {
       const doc = await createDocument({ clientId, category: f.category, title: f.title.trim(), reference: f.reference.trim(), status: f.status, file });
@@ -37,7 +37,7 @@ function DocumentForm({ clientId, onDone }) {
       </div>
       <div className="field"><label htmlFor="d-title">Titre du document</label><input id="d-title" value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} placeholder="Facture, acompte 50 %" /></div>
       <div className="field"><label htmlFor="d-ref">Référence Accountable</label><input id="d-ref" value={f.reference} onChange={(e) => setF({ ...f, reference: e.target.value })} placeholder="F-2026-030" /><span className="hint">Facultatif. Permet de retrouver la preuve d’acceptation ou la facture d’origine.</span></div>
-      <div className="field"><label htmlFor="d-file">Fichier PDF</label><input id="d-file" type="file" accept="application/pdf" onChange={(e) => setFile(e.target.files?.[0] || null)} /></div>
+      <div className="field"><label htmlFor="d-file">Fichier (PDF ou page HTML)</label><input id="d-file" type="file" accept="application/pdf,text/html,.pdf,.html,.htm" onChange={(e) => setFile(e.target.files?.[0] || null)} /><span className="hint">Une page HTML doit être autonome (images et polices intégrées). Elle s’affiche dans l’espace client ; le client peut la commenter, pas la surligner.</span></div>
       <label className="check"><input type="checkbox" checked={f.notify} onChange={(e) => setF({ ...f, notify: e.target.checked })} /> Prévenir le client par email</label>
       <ErrorBox>{error}</ErrorBox>
       <button className="btn btn-primary" type="submit" disabled={busy}>{busy ? 'Envoi du fichier…' : 'Publier dans l’espace client'}</button>
