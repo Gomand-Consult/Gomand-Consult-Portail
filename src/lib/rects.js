@@ -49,17 +49,34 @@ export function normalizeRects(clientRects, pageRect) {
   );
 }
 
+const WORD_CHAR = /[\p{L}\p{N}'’\-]/u;
+
+/** Recule jusqu'au début du mot, avance jusqu'à sa fin : un surlignage ne coupe plus un mot en deux. */
+export function snapOffsets(text, start, end) {
+  let s = start; let e = end;
+  while (s > 0 && WORD_CHAR.test(text[s - 1]) && WORD_CHAR.test(text[s] ?? ' ')) s -= 1;
+  while (e < text.length && WORD_CHAR.test(text[e]) && WORD_CHAR.test(text[e - 1] ?? ' ')) e += 1;
+  return [s, e];
+}
+
+function snapRange(range) {
+  const a = range.startContainer; const b = range.endContainer;
+  if (a.nodeType === 3) range.setStart(a, snapOffsets(a.data, range.startOffset, range.startOffset)[0]);
+  if (b.nodeType === 3) range.setEnd(b, snapOffsets(b.data, range.endOffset, range.endOffset)[1]);
+}
+
 /** Lit la sélection de texte courante, si elle se trouve dans une page du PDF. */
 export function captureSelection(root) {
   const sel = window.getSelection?.();
   if (!sel || sel.isCollapsed || !sel.rangeCount || !root) return null;
-  const range = sel.getRangeAt(0);
+  const range = sel.getRangeAt(0).cloneRange();
+  snapRange(range);
   const start = range.startContainer.nodeType === 1 ? range.startContainer : range.startContainer.parentElement;
   const pageEl = start?.closest?.('[data-page]');
   if (!pageEl || !root.contains(pageEl)) return null;
   const rects = normalizeRects(Array.from(range.getClientRects()), pageEl.getBoundingClientRect());
   if (!rects.length) return null;
-  const quote = sel.toString().replace(/\s+/g, ' ').trim().slice(0, 400);
+  const quote = range.toString().replace(/\s+/g, ' ').trim().slice(0, 400);
   const box = range.getBoundingClientRect();
   return { page: Number(pageEl.dataset.page), rects, quote, anchor: { top: box.top, bottom: box.bottom, left: box.left, width: box.width } };
 }

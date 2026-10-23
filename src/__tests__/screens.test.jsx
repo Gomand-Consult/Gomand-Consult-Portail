@@ -168,7 +168,7 @@ describe('Lecture d’un document', () => {
     expect(await screen.findByTestId('html')).toHaveTextContent('Bonjour');
     expect(api.documentUrl).not.toHaveBeenCalledWith('c1/a.html');
     expect(screen.getByRole('button', { name: 'Télécharger le fichier' })).toBeInTheDocument();
-    expect(screen.queryByRole('tab', { name: /Surlignages/ })).toBeNull();
+    expect(screen.getByRole('tab', { name: /Surlignages/ })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Commenter le document' }));
     fireEvent.change(screen.getByLabelText('Votre message'), { target: { value: 'Très clair' } });
     fireEvent.click(screen.getByRole('button', { name: 'Publier' }));

@@ -4,6 +4,9 @@ import { useAuth } from '../lib/auth';
 import { useToast } from '../lib/toast';
 import { getDocument, documentUrl, documentHtml, isHtmlDoc, listThreads, createHighlight, createThread, addMessage, setThreadStatus, deleteAnnotation, markDocumentViewed, notify } from '../lib/api';
 import { captureSelection } from '../lib/rects';
+import { hitAnnotation, indexAtPoint, pageModel, sentenceIndexAt, sentenceSelection } from '../lib/selection';
+import { useMedia } from '../lib/useMedia';
+import SelectionBar from '../components/SelectionBar';
 import { fmtDate, fmtDateTime } from '../lib/format';
 import { Header, Loading, ErrorBox, ARROW_BACK } from '../components/Layout';
 import { triggerDownload } from './ClientDashboard';
@@ -11,6 +14,8 @@ import { triggerDownload } from './ClientDashboard';
 const PdfViewer = lazy(() => import('../components/PdfViewer'));
 const HtmlViewer = lazy(() => import('../components/HtmlViewer'));
 
+const ZOOMS = [0.8, 1, 1.25, 1.5, 2, 2.5, 3];
+const pct = (z) => `${Math.round(z * 100)}\u00A0%`;
 const sortMsgs = (t) => (t.annotation_messages || []).slice().sort((a, b) => a.created_at.localeCompare(b.created_at));
 
 export default function DocumentViewer() {
@@ -31,8 +36,25 @@ export default function DocumentViewer() {
   const [composer, setComposer] = useState(null);
   const [drafts, setDrafts] = useState({});
   const [sel, setSel] = useState(null);
+  const [zoom, setZoom] = useState(1);
+  const [sheetOpen, setSheetOpen] = useState(false);
   const pagesRef = useRef(null);
+  const selRef = useRef(null);
+  const notesRef = useRef([]);
+  const lastPointer = useRef('mouse');
+  const downAt = useRef(0);
+  const barHeld = useRef(false);
+  const areaRef = useRef(null);
+  const htmlRef = useRef(null);
+  const keyRef = useRef(() => {});
+  const highlightRef = useRef(() => {});
+  const commentRef = useRef(() => {});
+  const coarse = useMedia('(pointer: coarse)');
+  const narrow = useMedia('(max-width: 1000px)');
+  selRef.current = sel;
   const isHtml = isHtmlDoc(doc);
+  const isHtmlRef = useRef(false);
+  isHtmlRef.current = isHtml;
 
   useEffect(() => {
     let alive = true;
@@ -62,49 +84,173 @@ export default function DocumentViewer() {
   const open = talks.filter((t) => t.status === 'open');
   const resolved = talks.filter((t) => t.status === 'resolved');
 
-  // Sélection de texte → barre flottante
+  notesRef.current = notes;
+
+  const clearSelection = useCallback(() => { window.getSelection()?.removeAllRanges(); htmlRef.current?.clear(); setSel(null); }, []);
+
+  // Sélection native (souris, ou appui long au doigt) → barre d'actions.
+  // On attend que le doigt ou la souris soit relevé : la barre ne saute plus pendant le glissement.
   useEffect(() => {
-    let timer;
-    const update = () => {
-      clearTimeout(timer);
-      timer = setTimeout(() => setSel(captureSelection(pagesRef.current)), 150);
+    let timer; let down = false;
+    const read = () => {
+      if (down || barHeld.current || isHtmlRef.current) return; // pour une page HTML, c'est le cadre qui signale la sélection
+      const native = captureSelection(pagesRef.current);
+      setSel((prev) => (native ? { ...native, source: 'native' } : prev?.source === 'tap' ? prev : null));
     };
-    document.addEventListener('selectionchange', update);
-    return () => { document.removeEventListener('selectionchange', update); clearTimeout(timer); };
+    const later = (ms) => { clearTimeout(timer); timer = setTimeout(read, ms); };
+    const onDown = (e) => { lastPointer.current = e.pointerType || 'mouse'; downAt.current = performance.now(); if (!e.target.closest?.('#seltool')) down = true; };
+    const onUp = () => { down = false; later(30); };
+    const onSel = () => later(150);
+    document.addEventListener('selectionchange', onSel);
+    document.addEventListener('pointerdown', onDown, true);
+    document.addEventListener('pointerup', onUp, true);
+    document.addEventListener('pointercancel', onUp, true);
+    return () => { clearTimeout(timer); document.removeEventListener('selectionchange', onSel); document.removeEventListener('pointerdown', onDown, true); document.removeEventListener('pointerup', onUp, true); document.removeEventListener('pointercancel', onUp, true); };
   }, []);
-  const clearSelection = () => { window.getSelection()?.removeAllRanges(); setSel(null); };
+
+  const scrollToPin = useCallback((tid) => {
+    if (isHtmlRef.current) {
+      const top = htmlRef.current?.topOf(tid);
+      if (top != null) window.scrollBy({ top: top - (window.matchMedia('(max-width: 1000px)').matches ? 110 : window.innerHeight / 2), behavior: 'smooth' });
+      return;
+    }
+    const el = pagesRef.current?.querySelector('.pin.active') || pagesRef.current?.querySelector('.ann-rect.active');
+    if (!el) return;
+    if (window.matchMedia('(max-width: 1000px)').matches) {
+      // La feuille de commentaires occupe le bas de l'écran : on remonte le passage dans le tiers supérieur.
+      window.scrollBy({ top: el.getBoundingClientRect().top - 110, behavior: 'smooth' });
+    } else el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }, []);
 
   const focusThread = useCallback((tid) => {
     setActive(tid);
     const t = threads.find((x) => x.id === tid);
     if (t) setTab(t.status === 'resolved' ? 'resolved' : 'open');
+    setSheetOpen(true);
     setTimeout(() => {
       document.getElementById(`th-${tid}`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-      pagesRef.current?.querySelector('.pin.active')?.scrollIntoView({ block: 'center', behavior: 'smooth' });
-    }, 50);
-  }, [threads]);
+      scrollToPin(tid);
+    }, 80);
+  }, [threads, scrollToPin]);
+
+  // Toucher une phrase la sélectionne ; toucher un passage déjà commenté ouvre l'échange.
+  useEffect(() => {
+    const root = areaRef.current; if (!root) return undefined;
+    const onClick = (e) => {
+      const pageEl = e.target.closest?.('.pdf-page');
+      if (!pageEl || e.target.closest('.pin')) return;
+      if (performance.now() - downAt.current > 450) return; // appui long : c'est la sélection native qui prend le relais
+      if (window.getSelection()?.toString()) return; // fin d'une sélection à la souris
+      if (selRef.current) { clearSelection(); return; } // un toucher ailleurs ferme la sélection en cours
+      const r = pageEl.getBoundingClientRect();
+      const page = Number(pageEl.dataset.page);
+      const hit = hitAnnotation(notesRef.current, page, (e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height);
+      if (hit && hit.kind !== 'highlight') { focusThread(hit.id); return; }
+      if (lastPointer.current !== 'touch' && lastPointer.current !== 'pen') return;
+      const model = pageModel(pageEl); if (!model) return;
+      const idx = indexAtPoint(model, e.clientX, e.clientY); if (idx < 0) return;
+      const k = sentenceIndexAt(model.sentences, idx); if (k < 0) return;
+      setSel(sentenceSelection(model, k));
+    };
+    root.addEventListener('click', onClick);
+    return () => root.removeEventListener('click', onClick);
+  }, [clearSelection, focusThread, doc]);
+
+  const resize = (delta) => {
+    if (isHtmlRef.current) { htmlRef.current?.resize(delta, selRef.current); return; }
+    resizePdf(delta);
+  };
+  const resizePdf = (delta) => setSel((cur) => {
+    if (!cur || cur.source !== 'tap') return cur;
+    const pageEl = pagesRef.current?.querySelector(`[data-page="${cur.page}"]`); const model = pageEl && pageModel(pageEl);
+    if (!model) return cur;
+    const to = Math.min(model.sentences.length - 1, Math.max(cur.from, cur.to + delta));
+    if (to === cur.to) return cur;
+    return sentenceSelection(model, cur.from, to) || cur;
+  });
+
+  // Clavier (ordinateur) : H surligne, C commente, Échap annule.
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.metaKey || e.ctrlKey || e.altKey || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || !selRef.current) return;
+      if (e.key === 'Escape') clearSelection();
+      else if (e.key === 'h' || e.key === 'H') { e.preventDefault(); highlightRef.current(); }
+      else if (e.key === 'c' || e.key === 'C') { e.preventDefault(); commentRef.current(); }
+    };
+    keyRef.current = onKey; // le cadre d'une page HTML y transmet aussi ses touches
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [clearSelection]);
+
+  // Indique à la page quels éléments occupent le bas de l'écran, pour placer les messages au bon endroit.
+  useEffect(() => {
+    document.body.classList.toggle('has-dock', Boolean(sel) && coarse);
+    document.body.classList.toggle('sheet-open', narrow && sheetOpen);
+    return () => document.body.classList.remove('has-dock', 'sheet-open');
+  }, [sel, coarse, narrow, sheetOpen]);
+
+  // Clavier virtuel : la feuille de commentaires remonte au-dessus du clavier.
+  useEffect(() => {
+    const vv = window.visualViewport; if (!vv) return undefined;
+    const set = () => {
+      document.documentElement.style.setProperty('--kb', `${Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop))}px`);
+      document.documentElement.style.setProperty('--vvh', `${Math.round(vv.height)}px`);
+    };
+    set(); vv.addEventListener('resize', set); vv.addEventListener('scroll', set);
+    return () => { vv.removeEventListener('resize', set); vv.removeEventListener('scroll', set); document.documentElement.style.removeProperty('--kb'); document.documentElement.style.removeProperty('--vvh'); };
+  }, []);
+
+  // Zoom : on garde au même endroit le point du document qui se trouve au centre de l'écran.
+  const zoomRef = useRef({ prev: 1, top: 0 });
+  const changeZoom = (dir) => {
+    const i = ZOOMS.indexOf(zoom); const next = ZOOMS[Math.min(ZOOMS.length - 1, Math.max(0, i + dir))];
+    if (next === zoom) return;
+    zoomRef.current = { prev: zoom, mid: window.scrollY + window.innerHeight / 2, holderTop: (pagesRef.current?.getBoundingClientRect().top || 0) + window.scrollY };
+    setZoom(next);
+  };
+  useEffect(() => {
+    const z = zoomRef.current; if (!z.mid || isHtmlRef.current) { zoomRef.current = { prev: zoom, mid: 0, holderTop: 0 }; return; }
+    const ratio = zoom / z.prev;
+    window.scrollTo({ top: z.holderTop + (z.mid - z.holderTop) * ratio - window.innerHeight / 2 });
+    zoomRef.current = { prev: zoom, mid: 0, holderTop: 0 };
+  }, [zoom]);
 
   // Ouverture directe d'un échange depuis le back-office (?thread=…)
   useEffect(() => {
     if (active && threads.length && params.get('thread') === active) focusThread(active);
   }, [threads.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const removeHighlight = async (h, silent) => {
+    try { await deleteAnnotation(h.id); setThreads((all) => all.filter((x) => x.id !== h.id)); if (!silent) toast('Surlignage retiré.'); }
+    catch (e) { toast(e.message); }
+  };
   const highlight = async () => {
-    if (!sel) return;
-    const s = sel; clearSelection();
+    const s = selRef.current; if (!s) return;
+    clearSelection();
     try {
       const row = await createHighlight({ documentId: id, page: s.page, rects: s.rects, quote: s.quote });
       setThreads((t) => [...t, { ...row, annotation_messages: [] }]);
-      toast('Passage surligné.');
+      toast('Passage surligné.', { label: 'Annuler', onClick: () => removeHighlight(row, false) });
     } catch (e) { toast(e.message); }
   };
   const startComment = () => {
-    if (!sel) return;
-    setComposer({ page: sel.page, rects: sel.rects, quote: sel.quote, type: 'comment', text: '', error: '' });
+    const s = selRef.current; if (!s) return;
+    setComposer({ page: s.page, rects: s.rects, quote: s.quote, type: 'comment', text: '', error: '' });
+    setTab('open');
+    if (narrow) { setSheetOpen(true); window.scrollBy({ top: s.anchor.top - 110, behavior: 'smooth' }); }
     clearSelection();
   };
-  // Pour une page HTML, il n'y a pas de pages ni de sélection : le commentaire porte sur le document entier.
-  const startPageComment = () => setComposer({ page: 1, rects: [{ x: 0.06, y: 0.03, w: 0.5, h: 0.02 }], quote: isHtml ? 'Document entier' : 'Page entière', type: 'comment', text: '', error: '', pageLevel: true });
+  highlightRef.current = highlight; commentRef.current = startComment;
+  // Commentaire sur une page entière : on propose la page actuellement visible.
+  const startPageComment = () => {
+    let page = 1; let best = Infinity; const mid = window.innerHeight / 2;
+    pagesRef.current?.querySelectorAll('.pdf-page').forEach((el) => {
+      const r = el.getBoundingClientRect(); const d = r.top <= mid && r.bottom >= mid ? 0 : Math.min(Math.abs(r.top - mid), Math.abs(r.bottom - mid));
+      if (d < best) { best = d; page = Number(el.dataset.page); }
+    });
+    setComposer({ page, rects: [{ x: 0.06, y: 0.03, w: 0.5, h: 0.02 }], quote: isHtml ? 'Document entier' : 'Page entière', type: 'comment', text: '', error: '', pageLevel: true });
+    setSheetOpen(true);
+  };
 
   const publish = async () => {
     const c = composer; const body = c.text.trim();
@@ -136,11 +282,6 @@ export default function DocumentViewer() {
       toast(status === 'resolved' ? 'Échange marqué comme résolu.' : 'Échange rouvert.');
     } catch (e) { toast(e.message); }
   };
-  const removeHighlight = async (h) => {
-    try { await deleteAnnotation(h.id); setThreads((all) => all.filter((x) => x.id !== h.id)); toast('Surlignage retiré.'); }
-    catch (e) { toast(e.message); }
-  };
-
   if (error) return <><Header /><div className="container"><ErrorBox>{error}</ErrorBox><p><Link to={isAdmin ? '/admin' : '/'}>Retour</Link></p></div></>;
   if (!doc) return <><Header /><Loading /></>;
 
@@ -164,23 +305,31 @@ export default function DocumentViewer() {
         </div>
       </div>
 
-      <div className="viewer">
-        <div className="doc-area">
-          <p className="hint">{isHtml ? 'Lisez le document ici, puis utilisez « Commenter le document » dans le panneau de droite.' : 'Sélectionnez un passage pour le surligner ou y ajouter un commentaire.'}</p>
+      <div className={`viewer${narrow && sheetOpen ? ' sheet-open' : ''}`}>
+        <div className="doc-area" ref={areaRef}>
+          <p className="hint">
+            {coarse
+              ? 'Touchez une phrase pour la sélectionner. Pour un passage précis, maintenez le doigt sur le texte.'
+              : 'Sélectionnez un passage pour le surligner ou y ajouter un commentaire. Raccourcis : H pour surligner, C pour commenter.'}
+          </p>
           <Suspense fallback={<Loading label="Chargement du lecteur…" />}>
             {isHtml
-              ? <HtmlViewer html={html} title={doc.title} />
-              : <PdfViewer url={url} annotations={notes} activeId={active} onPin={focusThread} containerRef={pagesRef} />}
+              ? <HtmlViewer ref={htmlRef} html={html} title={doc.title} annotations={notes} activeId={active} zoom={zoom} preview={sel?.source === 'tap' ? sel : null}
+                  onPin={focusThread} onSelect={setSel} getSelection={() => selRef.current} onKey={(e) => keyRef.current(e)} />
+              : <PdfViewer url={url} annotations={notes} activeId={active} onPin={focusThread} containerRef={pagesRef} zoom={zoom} preview={sel?.source === 'tap' ? sel : null} />}
           </Suspense>
         </div>
 
-        <aside className="panel" aria-label="Commentaires">
+        <aside className={`panel${narrow ? ' sheet' : ''}${sheetOpen ? ' open' : ''}`} aria-label="Commentaires">
           <div className="panel-head">
-            <h2>Commentaires</h2>
+            <div className="panel-title">
+              <h2>Commentaires</h2>
+              {narrow && <button type="button" className="sheet-close" onClick={() => setSheetOpen(false)} aria-label="Fermer les commentaires">Fermer</button>}
+            </div>
             <div className="tabs" role="tablist">
               {tabBtn('open', 'Ouverts', open.length)}
               {tabBtn('resolved', 'Résolus', resolved.length)}
-              {!isHtml && tabBtn('marks', 'Surlignages', highlights.length)}
+              {tabBtn('marks', 'Surlignages', highlights.length)}
             </div>
           </div>
 
@@ -197,10 +346,11 @@ export default function DocumentViewer() {
                 ))}
               </fieldset>
               <textarea rows="3" aria-label="Votre message" placeholder={composer.type === 'question' ? 'Votre question' : 'Votre commentaire'}
-                value={composer.text} onChange={(e) => setComposer({ ...composer, text: e.target.value, error: '' })} autoFocus />
+                value={composer.text} onChange={(e) => setComposer({ ...composer, text: e.target.value, error: '' })}
+                onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); publish(); } }} autoFocus />
               {composer.error && <p className="field-error" role="alert">{composer.error}</p>}
               <div className="row">
-                <button className="btn btn-primary btn-sm" onClick={publish}>Publier</button>
+                <button className="btn btn-primary btn-sm" onClick={publish}>Publier{!coarse && <span className="kbd-hint" aria-hidden="true"> Ctrl + Entrée</span>}</button>
                 <button className="btn btn-ghost btn-sm" onClick={() => setComposer(null)}>Annuler</button>
               </div>
             </section>
@@ -210,14 +360,14 @@ export default function DocumentViewer() {
             {!composer && <p style={{ margin: '14px 0 0' }}><button className="link-btn" onClick={startPageComment}>{isHtml ? 'Commenter le document' : 'Commenter une page entière'}</button></p>}
 
             {tab !== 'marks' && list.length === 0 && (
-              <p className="empty">{tab === 'resolved' ? 'Aucun échange résolu pour l’instant.' : `Aucun échange ouvert. ${isHtml ? 'Utilisez « Commenter le document » pour en démarrer un.' : 'Sélectionnez un passage du document pour en démarrer un.'}`}</p>
+              <p className="empty">{tab === 'resolved' ? 'Aucun échange résolu pour l’instant.' : 'Aucun échange ouvert. Sélectionnez un passage du document pour en démarrer un.'}</p>
             )}
             {tab !== 'marks' && list.map((t) => (
               <section key={t.id} id={`th-${t.id}`} className={`thread${t.id === active ? ' active' : ''}`} onClick={() => t.id !== active && focusThread(t.id)}>
                 <div className="thread-head">
                   <span className={`pin ${t.status}`}>{t.n}</span>
                   <strong>{t.kind === 'question' ? 'Question' : 'Commentaire'}</strong>
-                  <span className="meta">{isHtml ? 'Document' : `Page ${t.page}`}</span>
+                  <span className="meta">{isHtml ? (typeof t.rects?.[0]?.s === 'number' ? 'Passage' : 'Document') : `Page ${t.page}`}</span>
                   <span className={`status ${t.status}`}>{t.status === 'open' ? 'Ouvert' : 'Résolu'}</span>
                 </div>
                 <blockquote>{t.quote}</blockquote>
@@ -242,8 +392,8 @@ export default function DocumentViewer() {
             {tab === 'marks' && highlights.map((h) => (
               <div key={h.id} className="hl-item">
                 <blockquote>{h.quote}</blockquote>
-                <p className="muted">Page {h.page}, par {h.author_name}, {fmtDateTime(h.created_at)}</p>
-                {(h.author_id === myId || isAdmin) && <div className="row"><button className="btn btn-ghost btn-sm" onClick={() => removeHighlight(h)}>Retirer</button></div>}
+                <p className="muted">{isHtml ? 'Surligné' : `Page ${h.page}, surligné`} par {h.author_name}, {fmtDateTime(h.created_at)}</p>
+                {(h.author_id === myId || isAdmin) && <div className="row"><button className="btn btn-ghost btn-sm" onClick={() => removeHighlight(h, false)}>Retirer</button></div>}
               </div>
             ))}
           </div>
@@ -251,12 +401,19 @@ export default function DocumentViewer() {
       </div>
 
       {sel && (
-        <div id="seltool" role="toolbar" aria-label="Actions sur le passage sélectionné"
-          style={{ top: Math.max(8, sel.anchor.top - 52), left: Math.max(8, Math.min(sel.anchor.left + sel.anchor.width / 2 - 100, window.innerWidth - 216)) }}
-          onMouseDown={(e) => e.preventDefault()}>
-          <button onClick={highlight}>Surligner</button>
-          <button onClick={startComment}>Commenter</button>
+        <SelectionBar sel={sel} coarse={coarse} onHighlight={highlight} onComment={startComment}
+          onExtend={() => resize(1)} onReduce={() => resize(-1)} onClose={clearSelection} onHold={(v) => { barHeld.current = v; }} />
+      )}
+
+      {!sel && (
+        <div className="zoom" role="group" aria-label="Taille du document">
+          <button type="button" onClick={() => changeZoom(-1)} disabled={zoom <= ZOOMS[0]} aria-label="Réduire le document">−</button>
+          <button type="button" className="zoom-val" onClick={() => { if (zoom !== 1) { zoomRef.current = { prev: zoom, mid: window.scrollY + window.innerHeight / 2, holderTop: (pagesRef.current?.getBoundingClientRect().top || 0) + window.scrollY }; setZoom(1); } }} aria-label="Taille normale">{pct(zoom)}</button>
+          <button type="button" onClick={() => changeZoom(1)} disabled={zoom >= ZOOMS[ZOOMS.length - 1]} aria-label="Agrandir le document">+</button>
         </div>
+      )}
+      {narrow && !sel && !sheetOpen && (
+        <button type="button" className="fab" onClick={() => setSheetOpen(true)}>Commentaires <span>{open.length}</span></button>
       )}
     </>
   );

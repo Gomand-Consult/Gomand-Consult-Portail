@@ -43,3 +43,21 @@ describe('normalizeRects', () => {
     expect(out[0].x + out[0].w).toBeLessThanOrEqual(1.0001);
   });
 });
+
+import { snapOffsets } from '../lib/rects';
+describe('snapOffsets', () => {
+  const t = 'La mission débute par un diagnostic';
+  it('élargit une sélection coupée au milieu d’un mot', () => {
+    const [s, e] = snapOffsets(t, 5, 20); // « ssion débute » -> « mission débute par »
+    expect(t.slice(s, e)).toBe('mission débute par');
+  });
+  it('ne bouge pas une sélection déjà alignée sur des mots', () => {
+    const [s, e] = snapOffsets(t, 3, 10);
+    expect(t.slice(s, e)).toBe('mission');
+  });
+  it('garde les mots composés et les apostrophes entiers', () => {
+    const u = "suivi d'un plan quarante-cinq";
+    const [s, e] = snapOffsets(u, 9, 24);
+    expect(u.slice(s, e)).toBe("d'un plan quarante-cinq");
+  });
+});

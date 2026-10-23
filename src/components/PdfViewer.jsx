@@ -10,10 +10,13 @@ const RESOURCES = {
   isEvalSupported: false, // la politique de sécurité du site interdit eval
 };
 
-function Page({ pdf, n, width, ratio, notes, activeId, onPin }) {
+const PIN_STEP = 30; // hauteur minimale entre deux repères dans la marge
+
+function Page({ pdf, n, width, ratio, notes, activeId, onPin, preview }) {
   const wrap = useRef(null), canvas = useRef(null), text = useRef(null), lastTask = useRef(null);
   const [visible, setVisible] = useState(n <= 2);
   const [height, setHeight] = useState(Math.round(width * ratio));
+  useEffect(() => { setHeight(Math.round(width * ratio)); }, [width, ratio]);
 
   useEffect(() => {
     if (visible || !wrap.current) return undefined;
@@ -38,7 +41,6 @@ function Page({ pdf, n, width, ratio, notes, activeId, onPin }) {
       const dpr = window.devicePixelRatio || 1;
       const c = canvas.current;
       c.width = Math.floor(viewport.width * dpr); c.height = Math.floor(viewport.height * dpr);
-      c.style.width = `${Math.floor(viewport.width)}px`; c.style.height = `${Math.floor(viewport.height)}px`;
       renderTask = page.render({ canvas: c, viewport, transform: dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : undefined });
       lastTask.current = renderTask;
       await renderTask.promise;
@@ -53,6 +55,13 @@ function Page({ pdf, n, width, ratio, notes, activeId, onPin }) {
     return () => { cancelled = true; try { renderTask?.cancel(); } catch { /* déjà terminé */ } try { layer?.cancel(); } catch { /* idem */ } };
   }, [pdf, n, width, visible]);
 
+  // Les repères numérotés vivent dans la marge gauche, empilés pour ne jamais se chevaucher ni sortir de la page.
+  const pins = useMemo(() => {
+    const list = notes.filter((a) => a.kind !== 'highlight' && a.rects[0]).map((a) => ({ a, y: a.rects[0].y * height })).sort((p, q) => p.y - q.y);
+    let floor = -Infinity;
+    return list.map((p) => { const y = Math.min(Math.max(p.y - 4, floor), Math.max(0, height - PIN_STEP)); floor = y + PIN_STEP; return { ...p, y }; });
+  }, [notes, height]);
+
   return (
     <div ref={wrap} className="pdf-page" data-page={n} style={{ width, height }} aria-label={`Page ${n}`}>
       <canvas ref={canvas} />
@@ -61,11 +70,14 @@ function Page({ pdf, n, width, ratio, notes, activeId, onPin }) {
           <div key={`${a.id}-${i}`} className={`ann-rect ${a.kind === 'highlight' ? 'highlight' : 'comment'}${a.status === 'resolved' ? ' resolved' : ''}${a.id === activeId ? ' active' : ''}`}
             style={{ left: `${r.x * 100}%`, top: `${r.y * 100}%`, width: `${r.w * 100}%`, height: `${r.h * 100}%` }} />
         )))}
+        {preview?.page === n && preview.rects.map((r, i) => (
+          <div key={`p-${i}`} className="ann-rect preview" style={{ left: `${r.x * 100}%`, top: `${r.y * 100}%`, width: `${r.w * 100}%`, height: `${r.h * 100}%` }} />
+        ))}
       </div>
       <div ref={text} className="textLayer" />
       <div className="pin-layer">
-        {notes.filter((a) => a.kind !== 'highlight' && a.rects[0]).map((a) => (
-          <button key={a.id} className={`pin ${a.status}${a.id === activeId ? ' active' : ''}`} style={{ left: `${a.rects[0].x * 100}%`, top: `${a.rects[0].y * 100}%` }}
+        {pins.map(({ a, y }) => (
+          <button key={a.id} className={`pin ${a.status}${a.id === activeId ? ' active' : ''}`} style={{ top: `${y}px` }}
             onClick={() => onPin(a.id)} aria-label={`Voir l’échange ${a.n}`}>{a.n}</button>
         ))}
       </div>
@@ -73,10 +85,10 @@ function Page({ pdf, n, width, ratio, notes, activeId, onPin }) {
   );
 }
 
-export default function PdfViewer({ url, annotations, activeId, onPin, containerRef }) {
+export default function PdfViewer({ url, annotations, activeId, onPin, containerRef, zoom = 1, preview = null }) {
   const [pdf, setPdf] = useState(null);
   const [error, setError] = useState('');
-  const [width, setWidth] = useState(0);
+  const [base, setBase] = useState(0);
   const [ratio, setRatio] = useState(1.414);
   const holder = useRef(null);
 
@@ -94,12 +106,13 @@ export default function PdfViewer({ url, annotations, activeId, onPin, container
 
   useEffect(() => {
     const el = holder.current; if (!el) return undefined;
-    const measure = () => setWidth(Math.max(280, Math.min(Math.floor(el.clientWidth), 900)));
+    const measure = () => setBase(Math.max(280, Math.min(Math.floor(el.clientWidth), 900)));
     measure();
     const ro = new ResizeObserver(measure); ro.observe(el);
     return () => ro.disconnect();
   }, []);
 
+  const width = Math.round(base * zoom);
   const byPage = useMemo(() => {
     const m = new Map();
     (annotations || []).forEach((a) => { if (!m.has(a.page)) m.set(a.page, []); m.get(a.page).push(a); });
@@ -107,11 +120,11 @@ export default function PdfViewer({ url, annotations, activeId, onPin, container
   }, [annotations]);
 
   return (
-    <div ref={(el) => { holder.current = el; if (containerRef) containerRef.current = el; }} className="pdf-pages">
+    <div ref={(el) => { holder.current = el; if (containerRef) containerRef.current = el; }} className={`pdf-pages${zoom > 1 ? ' zoomed' : ''}`}>
       {error && <p className="error-box" role="alert">{error}</p>}
       {!pdf && !error && <p className="loading" role="status">Chargement du document…</p>}
       {pdf && width > 0 && Array.from({ length: pdf.numPages }, (_, i) => i + 1).map((n) => (
-        <Page key={n} pdf={pdf} n={n} width={width} ratio={ratio} notes={byPage.get(n) || []} activeId={activeId} onPin={onPin} />
+        <Page key={n} pdf={pdf} n={n} width={width} ratio={ratio} notes={byPage.get(n) || []} activeId={activeId} onPin={onPin} preview={preview} />
       ))}
     </div>
   );
