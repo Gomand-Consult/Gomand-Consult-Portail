@@ -9,10 +9,14 @@ import { sentenceIndexAt, splitSentences } from '../lib/selection';
 // Le cadre prend la hauteur de la page : on fait défiler le portail, pas un cadre dans le cadre.
 const STYLE = `
 mark[data-gc]{background:rgba(232,106,74,.30);color:inherit;border-radius:2px;padding:0}
-mark.gc-cm{background:rgba(104,126,140,.30);border-bottom:2px solid #687E8C;cursor:pointer}
-mark.gc-resolved{background:rgba(104,126,140,.14);border-bottom-color:rgba(104,126,140,.4)}
+mark.gc-hl{background:rgba(255,214,10,.45)}
+mark.gc-cm{border-bottom:2px solid #E86A4A;cursor:pointer}
+mark.gc-resolved{background:rgba(232,106,74,.12);border-bottom-color:rgba(232,106,74,.4)}
+mark.gc-hl.gc-resolved{background:rgba(255,214,10,.45)}
 mark.gc-active{background:rgba(232,106,74,.5);border-bottom-color:#E86A4A}
+mark.gc-hl.gc-active{background:rgba(255,214,10,.7);outline:2px solid #E86A4A}
 mark.gc-preview{background:rgba(50,74,89,.22);outline:1.5px solid #324A59}
+mark.gc-preview.gc-cmprev{background:rgba(232,106,74,.30);outline:none;border-bottom:2px solid #E86A4A}
 mark[data-n]::before{content:attr(data-n);display:inline-block;min-width:18px;margin-right:4px;padding:0 4px;border-radius:3px;background:#E86A4A;color:#252A2B;font:700 11px/17px system-ui,sans-serif;text-align:center;-webkit-user-select:none;user-select:none}
 html{-webkit-tap-highlight-color:transparent;-webkit-touch-callout:none}
 `;
@@ -34,10 +38,14 @@ const HtmlViewer = forwardRef(function HtmlViewer({ html, title, annotations = [
 
   const fit = useCallback(() => {
     const s = state.current; const f = frame.current; if (!s.doc || !f) return;
+    // Réduire le cadre pour le mesurer raccourcit brièvement la page : le navigateur ramènerait alors le lecteur en haut.
+    // On note donc la position et on la rétablit aussitôt (sans affichage intermédiaire).
+    const y = window.scrollY; const x = window.scrollX;
     f.style.height = '0px';
     const h = Math.ceil(Math.max(s.doc.documentElement.scrollHeight, s.doc.body?.scrollHeight || 0));
-    if (h < MIN_FRAME) { setFixed(true); f.style.height = ''; return; } // page conçue pour remplir l'écran : on garde un cadre défilant
-    setFixed(false); f.style.height = `${h + 2}px`;
+    if (h < MIN_FRAME) { setFixed(true); f.style.height = ''; } // page conçue pour remplir l'écran : on garde un cadre défilant
+    else { setFixed(false); f.style.height = `${h + 2}px`; }
+    if (window.scrollY !== y || window.scrollX !== x) window.scrollTo(x, y);
   }, []);
 
   const paint = useCallback(() => {
@@ -46,10 +54,10 @@ const HtmlViewer = forwardRef(function HtmlViewer({ html, title, annotations = [
     const items = [];
     for (const a of notes) {
       const r = a.rects?.[0]; if (!r || typeof r.s !== 'number') continue;
-      const cls = `${a.kind === 'highlight' ? '' : 'gc-cm'}${a.status === 'resolved' ? ' gc-resolved' : ''}${a.id === act ? ' gc-active' : ''}`.trim();
+      const cls = `${a.kind === 'highlight' ? 'gc-hl' : 'gc-cm'}${a.status === 'resolved' ? ' gc-resolved' : ''}${a.id === act ? ' gc-active' : ''}`.trim();
       items.push({ id: a.id, s: r.s, e: r.e, cls, n: a.kind === 'highlight' ? 0 : a.n });
     }
-    if (pv?.rects?.[0] && typeof pv.rects[0].s === 'number') items.push({ id: 'preview', s: pv.rects[0].s, e: pv.rects[0].e, cls: 'gc-preview' });
+    if (pv?.rects?.[0] && typeof pv.rects[0].s === 'number') items.push({ id: 'preview', s: pv.rects[0].s, e: pv.rects[0].e, cls: `gc-preview${pv.tone === 'comment' ? ' gc-cmprev' : ''}` });
     try { applyMarks(s.doc, items); } catch (e) { console.error(e); }
     refreshIndex(); fit();
   }, [fit, refreshIndex]);

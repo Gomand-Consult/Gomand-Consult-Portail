@@ -71,7 +71,7 @@ function Page({ pdf, n, width, ratio, notes, activeId, onPin, preview }) {
             style={{ left: `${r.x * 100}%`, top: `${r.y * 100}%`, width: `${r.w * 100}%`, height: `${r.h * 100}%` }} />
         )))}
         {preview?.page === n && preview.rects.map((r, i) => (
-          <div key={`p-${i}`} className="ann-rect preview" style={{ left: `${r.x * 100}%`, top: `${r.y * 100}%`, width: `${r.w * 100}%`, height: `${r.h * 100}%` }} />
+          <div key={`p-${i}`} className={`ann-rect preview${preview.tone === 'comment' ? ' comment-preview' : ''}`} style={{ left: `${r.x * 100}%`, top: `${r.y * 100}%`, width: `${r.w * 100}%`, height: `${r.h * 100}%` }} />
         ))}
       </div>
       <div ref={text} className="textLayer" />

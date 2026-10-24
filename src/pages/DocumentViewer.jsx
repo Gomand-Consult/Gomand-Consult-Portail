@@ -85,6 +85,8 @@ export default function DocumentViewer() {
   const resolved = talks.filter((t) => t.status === 'resolved');
 
   notesRef.current = notes;
+  // Passage mis en évidence : la sélection au toucher, ou le passage que l'on est en train de commenter.
+  const preview = sel?.source === 'tap' ? sel : (composer && !composer.pageLevel ? { page: composer.page, rects: composer.rects, tone: 'comment' } : null);
 
   const clearSelection = useCallback(() => { window.getSelection()?.removeAllRanges(); htmlRef.current?.clear(); setSel(null); }, []);
 
@@ -314,9 +316,9 @@ export default function DocumentViewer() {
           </p>
           <Suspense fallback={<Loading label="Chargement du lecteur…" />}>
             {isHtml
-              ? <HtmlViewer ref={htmlRef} html={html} title={doc.title} annotations={notes} activeId={active} zoom={zoom} preview={sel?.source === 'tap' ? sel : null}
+              ? <HtmlViewer ref={htmlRef} html={html} title={doc.title} annotations={notes} activeId={active} zoom={zoom} preview={preview}
                   onPin={focusThread} onSelect={setSel} getSelection={() => selRef.current} onKey={(e) => keyRef.current(e)} />
-              : <PdfViewer url={url} annotations={notes} activeId={active} onPin={focusThread} containerRef={pagesRef} zoom={zoom} preview={sel?.source === 'tap' ? sel : null} />}
+              : <PdfViewer url={url} annotations={notes} activeId={active} onPin={focusThread} containerRef={pagesRef} zoom={zoom} preview={preview} />}
           </Suspense>
         </div>
 
