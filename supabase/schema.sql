@@ -200,42 +200,50 @@ alter table public.photo_messages      enable row level security;
 
 -- clients
 create policy clients_select on public.clients for select to authenticated using (public.can_access_client(id));
-create policy clients_admin_write on public.clients for all to authenticated using (public.is_admin()) with check (public.is_admin());
+create policy clients_admin_insert on public.clients for insert to authenticated with check (public.is_admin());
+create policy clients_admin_update on public.clients for update to authenticated using (public.is_admin()) with check (public.is_admin());
+create policy clients_admin_delete on public.clients for delete to authenticated using (public.is_admin());
 
 -- profiles (lecture seule depuis le navigateur ; l'écriture passe par la fonction Netlify)
-create policy profiles_select on public.profiles for select to authenticated using (id = auth.uid() or public.is_admin());
+create policy profiles_select on public.profiles for select to authenticated using (id = (select auth.uid()) or public.is_admin());
 
 -- documents
 create policy documents_select on public.documents for select to authenticated using (public.can_access_client(client_id));
-create policy documents_admin_write on public.documents for all to authenticated using (public.is_admin()) with check (public.is_admin());
+create policy documents_admin_insert on public.documents for insert to authenticated with check (public.is_admin());
+create policy documents_admin_update on public.documents for update to authenticated using (public.is_admin()) with check (public.is_admin());
+create policy documents_admin_delete on public.documents for delete to authenticated using (public.is_admin());
 
 -- annotations
 create policy annotations_select on public.annotations for select to authenticated using (public.can_access_document(document_id));
 create policy annotations_insert on public.annotations for insert to authenticated
-  with check (author_id = auth.uid() and public.can_access_document(document_id));
+  with check (author_id = (select auth.uid()) and public.can_access_document(document_id));
 create policy annotations_update on public.annotations for update to authenticated
   using (public.can_access_document(document_id)) with check (public.can_access_document(document_id));
 create policy annotations_delete on public.annotations for delete to authenticated
-  using (public.is_admin() or (author_id = auth.uid() and public.can_access_document(document_id)));
+  using (public.is_admin() or (author_id = (select auth.uid()) and public.can_access_document(document_id)));
 
 -- messages d'annotation
 create policy annotation_messages_select on public.annotation_messages for select to authenticated using (public.can_access_annotation(annotation_id));
 create policy annotation_messages_insert on public.annotation_messages for insert to authenticated
-  with check (author_id = auth.uid() and public.can_access_annotation(annotation_id));
+  with check (author_id = (select auth.uid()) and public.can_access_annotation(annotation_id));
 create policy annotation_messages_delete on public.annotation_messages for delete to authenticated using (public.is_admin());
 
 -- galeries
 create policy galleries_select on public.galleries for select to authenticated using (public.can_access_client(client_id));
-create policy galleries_admin_write on public.galleries for all to authenticated using (public.is_admin()) with check (public.is_admin());
+create policy galleries_admin_insert on public.galleries for insert to authenticated with check (public.is_admin());
+create policy galleries_admin_update on public.galleries for update to authenticated using (public.is_admin()) with check (public.is_admin());
+create policy galleries_admin_delete on public.galleries for delete to authenticated using (public.is_admin());
 
 -- photos
 create policy photos_select on public.photos for select to authenticated using (public.can_access_gallery(gallery_id));
-create policy photos_admin_write on public.photos for all to authenticated using (public.is_admin()) with check (public.is_admin());
+create policy photos_admin_insert on public.photos for insert to authenticated with check (public.is_admin());
+create policy photos_admin_update on public.photos for update to authenticated using (public.is_admin()) with check (public.is_admin());
+create policy photos_admin_delete on public.photos for delete to authenticated using (public.is_admin());
 
 -- messages de photo
 create policy photo_messages_select on public.photo_messages for select to authenticated using (public.can_access_photo(photo_id));
 create policy photo_messages_insert on public.photo_messages for insert to authenticated
-  with check (author_id = auth.uid() and public.can_access_photo(photo_id));
+  with check (author_id = (select auth.uid()) and public.can_access_photo(photo_id));
 create policy photo_messages_delete on public.photo_messages for delete to authenticated using (public.is_admin());
 
 -- ----------------------------------------------------------------- Droits ----
@@ -334,7 +342,7 @@ language sql stable security definer set search_path = public as $$
 $$;
 
 -- Appelée par le workflow GitHub « keep-alive » pour éviter la mise en pause du plan gratuit.
-create function public.ping() returns integer language sql stable as $$ select 1 $$;
+create function public.ping() returns integer language sql stable set search_path = '' as $$ select 1 $$;
 
 revoke execute on all functions in schema public from public, anon, authenticated;
 grant execute on function public.is_admin(), public.my_client_id(), public.can_access_client(uuid),
@@ -343,6 +351,11 @@ grant execute on function public.is_admin(), public.my_client_id(), public.can_a
   public.mark_document_viewed(uuid), public.mark_gallery_viewed(uuid), public.set_photo_decision(uuid, text),
   public.send_gallery_selection(uuid), public.accept_privacy(text), public.admin_pending() to authenticated;
 grant execute on function public.ping() to anon, authenticated;
+
+-- Index sur les clés étrangères « auteur » (migration 004)
+create index if not exists annotation_messages_author_idx on public.annotation_messages (author_id);
+create index if not exists annotations_author_idx on public.annotations (author_id);
+create index if not exists photo_messages_author_idx on public.photo_messages (author_id);
 
 -- ---------------------------------------------------------------- Stockage ----
 
