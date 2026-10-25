@@ -75,7 +75,7 @@ Les intitulés des menus peuvent légèrement varier chez les fournisseurs.
 3. Déployez. Puis **Domain management → Add a domain** : `espace.gomandconsult.com`, et créez chez votre gestionnaire de domaine l'enregistrement `CNAME` que Netlify indique. Le certificat HTTPS est automatique.
 
 ### 5. Éviter la mise en pause (formule gratuite de Supabase)
-Dans GitHub : *Settings → Secrets and variables → Actions*, créez `SUPABASE_URL` et `SUPABASE_ANON_KEY`. Le workflow `.github/workflows/keep-alive.yml` appelle la base tous les 3 jours. Inutile avec la formule Pro.
+Le workflow `.github/workflows/keep-alive.yml` appelle la base tous les 3 jours. Il n'a besoin d'aucun secret (l'adresse et la clé publique du projet y sont écrites ; à mettre à jour si vous changez de projet Supabase). Inutile avec la formule Pro.
 
 ### 6. Premier test (à faire avant d'inviter un vrai client)
 1. Ouvrez le portail, connectez-vous avec votre compte Anthony : vous arrivez sur le back-office.
