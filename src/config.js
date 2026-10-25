@@ -27,8 +27,8 @@ export const LEGAL = {
   address: 'Rue du Moulin 35, 1457 Walhain, Belgique',
   phone: '+32 496 90 30 51',
   privacyEmail: 'hello@gomandconsult.com',
-  bce: '', // numéro d'entreprise (BCE), ex. 0123.456.789
-  vat: '', // numéro de TVA, ex. BE 0123.456.789
+  bce: '1021.417.126', // numéro d'entreprise (BCE)
+  vat: 'BE 1021.417.126', // numéro de TVA
   siteCookiesUrl: 'https://gomandconsult.com/politique-cookies.html',
 };
 // À changer à chaque modification importante de la politique : chaque client est invité à en reprendre connaissance.
