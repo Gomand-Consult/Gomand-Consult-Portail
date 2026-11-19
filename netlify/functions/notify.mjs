@@ -47,6 +47,18 @@ const handlers = {
     if (!g || g.notified_at || !fresh(g.created_at)) return null;
     return { table: 'galleries', id, mail: { to: await clientUsers(sb, g.client_id), subject: 'Une nouvelle galerie photo vous attend', title: 'Nouvelle galerie photo', intro: `La galerie « ${g.title} » est prête : approuvez, refusez ou commentez chaque photo.`, cta: 'Voir la galerie', url: `${siteUrl()}/galeries/${g.id}` } };
   },
+  // Un dépôt = plusieurs fichiers : un seul email. L'identifiant reçu est celui d'un des fichiers du dépôt.
+  async files_published(sb, me, id) {
+    if (me.profile.role !== 'admin') return null;
+    const { data: f } = await sb.from('files').select('id, client_id, lot, created_at, notified_at').eq('id', id).maybeSingle();
+    if (!f || f.notified_at || !fresh(f.created_at)) return null;
+    const since = new Date(new Date(f.created_at).getTime() - FRESH_MS).toISOString();
+    const { data: sibs } = await sb.from('files').select('id').eq('client_id', f.client_id).is('notified_at', null).gte('created_at', since);
+    const ids = (sibs || []).map((x) => x.id);
+    const n = ids.length || 1;
+    const what = f.lot ? `« ${f.lot} »` : n > 1 ? `${n} fichiers` : 'un fichier';
+    return { table: 'files', id, alsoIds: ids.filter((x) => x !== id), mail: { to: await clientUsers(sb, f.client_id), subject: 'De nouveaux fichiers sont disponibles', title: 'Nouveaux fichiers', intro: `${f.lot ? `Le dépôt ${what}` : what.charAt(0).toUpperCase() + what.slice(1)} (${n} fichier${n > 1 ? 's' : ''}) ${n > 1 || f.lot ? 'sont' : 'est'} disponible${n > 1 || f.lot ? 's' : ''} au téléchargement dans votre espace client.`, cta: 'Télécharger les fichiers', url: `${siteUrl()}/#fichiers` } };
+  },
 };
 
 export default async (req) => {
@@ -68,8 +80,9 @@ export default async (req) => {
     // On « réserve » l'envoi avant d'écrire à Resend : un second appel concurrent ne peut pas doubler l'email.
     const { data: claimed } = await sb.from(job.table).update({ notified_at: new Date().toISOString() }).eq('id', job.id).is('notified_at', null).select('id');
     if (!claimed?.length) return json(200, { sent: false, reason: 'déjà envoyé' });
+    if (job.alsoIds?.length) await sb.from(job.table).update({ notified_at: new Date().toISOString() }).in('id', job.alsoIds).is('notified_at', null);
     const result = await sendEmail(job.mail);
-    if (!result.sent) await sb.from(job.table).update({ notified_at: null }).eq('id', job.id);
+    if (!result.sent) await sb.from(job.table).update({ notified_at: null }).in('id', [job.id, ...(job.alsoIds || [])]);
     return json(200, result);
   } catch (e) {
     console.error('notify:', e?.message);

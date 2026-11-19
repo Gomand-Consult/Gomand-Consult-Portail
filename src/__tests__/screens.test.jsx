@@ -20,6 +20,7 @@ vi.mock('../lib/api', () => ({
   adminPending: vi.fn(), listClients: vi.fn(), inviteClient: vi.fn(),
   acceptPrivacy: vi.fn(), deleteClient: vi.fn(), removeUser: vi.fn(), exportClientData: vi.fn(), listProfiles: vi.fn(),
   createDocument: vi.fn(), updateDocumentStatus: vi.fn(), deleteDocument: vi.fn(), createGallery: vi.fn(), deleteGallery: vi.fn(),
+  listFiles: vi.fn(), fileUrl: vi.fn(), createFiles: vi.fn(), deleteFiles: vi.fn(),
 }));
 vi.mock('../components/HtmlViewer', () => ({ default: ({ html }) => <div data-testid="html">{html}</div> }));
 vi.mock('../components/PdfViewer', () => ({ default: ({ annotations }) => <div data-testid="pdf">{annotations.length} annotations</div> }));
@@ -40,7 +41,7 @@ const client = { id: 'c1', company: 'Maison Lambert', contact_name: 'Claire Dubo
 const wrap = (ui, path, route) => render(
   <MemoryRouter initialEntries={[path]}><ToastProvider><Routes><Route path={route} element={ui} /></Routes></ToastProvider></MemoryRouter>,
 );
-beforeEach(() => { vi.clearAllMocks(); state.refresh = vi.fn(); state.anonymous = false; state.profile = { id: 'u1', role: 'client', client_id: 'c1', full_name: 'Claire Dubois' }; });
+beforeEach(() => { vi.clearAllMocks(); api.listFiles.mockResolvedValue([]); api.signedUrls.mockResolvedValue({}); state.refresh = vi.fn(); state.anonymous = false; state.profile = { id: 'u1', role: 'client', client_id: 'c1', full_name: 'Claire Dubois' }; });
 
 describe('Connexion', () => {
   it('affiche l’erreur renvoyée par le serveur', async () => {
@@ -70,6 +71,24 @@ describe('Espace client', () => {
     expect(screen.getAllByText('1 échange ouvert')).toHaveLength(2); // bandeau + ligne de la facture ; le surlignage ne compte pas
     expect(screen.getByRole('link', { name: 'Écrire sur WhatsApp' }).href).toContain('https://wa.me/32496903051');
     expect(screen.getByRole('link', { name: 'Écrire par email' }).href).toContain('mailto:anthony@gomandconsult.com');
+  });
+  it('liste les fichiers déposés par dépôt et propose le téléchargement', async () => {
+    api.getClient.mockResolvedValue(client); api.listDocuments.mockResolvedValue([]); api.listGalleries.mockResolvedValue([]);
+    api.listFiles.mockResolvedValue([
+      { id: 'f1', client_id: 'c1', lot: 'Photos annonce Roses', note: 'Pour votre annonce', name: 'salon.jpg', storage_path: 'c1/b1/a.jpg', thumb_path: 'c1/b1/a_t.jpg', mime: 'image/jpeg', size_bytes: 2097152, created_at: '2026-10-05T10:00:00Z' },
+      { id: 'f2', client_id: 'c1', lot: 'Photos annonce Roses', note: 'Pour votre annonce', name: 'cuisine.jpg', storage_path: 'c1/b1/b.jpg', thumb_path: null, mime: 'image/jpeg', size_bytes: 1048576, created_at: '2026-10-05T10:00:00Z' },
+    ]);
+    api.signedUrls.mockResolvedValue({ 'c1/b1/a_t.jpg': 'https://x/t.jpg' });
+    wrap(<ClientDashboard clientId="c1" />, '/', '/');
+    expect(await screen.findByRole('heading', { name: 'Fichiers à télécharger' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Photos annonce Roses' })).toBeInTheDocument();
+    expect(screen.getByText(/2 fichiers, 3,0 Mo/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Tout télécharger (.zip)' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Télécharger salon.jpg' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Supprimer|Retirer/ })).toBeNull(); // le client ne peut rien supprimer
+    api.fileUrl.mockResolvedValue('https://x/dl');
+    fireEvent.click(screen.getByRole('button', { name: 'Télécharger cuisine.jpg' }));
+    await waitFor(() => expect(api.fileUrl).toHaveBeenCalledWith('c1/b1/b.jpg', 'cuisine.jpg'));
   });
   it('n’affiche pas le bandeau de contact dans l’aperçu d’Anthony', async () => {
     state.profile = { id: 'a', role: 'admin', full_name: 'Anthony' };
@@ -236,6 +255,22 @@ describe('Suppression d’un client (back-office)', () => {
     api.listProfiles.mockResolvedValue([{ id: 'p1', full_name: 'Claire Dubois', email: 'claire@lambert.be' }]);
     wrap(<AdminClient />, '/admin/clients/c1', '/admin/clients/:id');
   };
+  it('dépose des fichiers puis prévient le client', async () => {
+    setupAdmin(); api.createFiles.mockResolvedValue([{ id: 'f9' }]);
+    const input = await screen.findByLabelText('Fichiers');
+    const file = new File(['abc'], 'photo.jpg', { type: 'image/jpeg' });
+    fireEvent.change(input, { target: { files: [file] } });
+    fireEvent.change(screen.getByLabelText('Titre du dépôt'), { target: { value: 'Annonce' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Déposer les fichiers' }));
+    await waitFor(() => expect(api.createFiles).toHaveBeenCalledWith(expect.objectContaining({ clientId: 'c1', lot: 'Annonce', files: [file] })));
+    await waitFor(() => expect(api.notify).toHaveBeenCalledWith('files_published', 'f9'));
+  });
+  it('refuse un dépôt sans fichier', async () => {
+    setupAdmin();
+    fireEvent.click(await screen.findByRole('button', { name: 'Déposer les fichiers' }));
+    expect(await screen.findByText('Choisissez au moins un fichier.')).toBeInTheDocument();
+    expect(api.createFiles).not.toHaveBeenCalled();
+  });
   it('exige le nom exact de l’entreprise avant d’activer la suppression', async () => {
     setupAdmin(); api.deleteClient.mockResolvedValue(null);
     await screen.findByRole('heading', { name: 'Maison Lambert' });

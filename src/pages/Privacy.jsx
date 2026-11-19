@@ -32,7 +32,7 @@ export default function Privacy() {
           <h2>2. Quelles données sont utilisées ?</h2>
           <ul>
             <Li>Votre compte : nom, adresse email, entreprise et mot de passe. Le mot de passe est enregistré sous une forme chiffrée illisible, y compris pour nous.</Li>
-            <Li>Le contenu de votre espace : devis, factures (copies de consultation), livrables, comptes rendus et photos, ainsi que vos commentaires, questions, surlignages et décisions sur les photos.</Li>
+            <Li>Le contenu de votre espace : devis, factures (copies de consultation), livrables, comptes rendus, photos et fichiers déposés à votre intention, ainsi que vos commentaires, questions, surlignages et décisions sur les photos.</Li>
             <Li>Des informations de suivi du service : date de première consultation d’un document ou d’une galerie, envoi d’une sélection de photos, date à laquelle vous avez pris connaissance de cette politique.</Li>
             <Li>Des données techniques (adresse IP, navigateur, dates de connexion), conservées dans les journaux de sécurité de nos prestataires d’hébergement.</Li>
           </ul>

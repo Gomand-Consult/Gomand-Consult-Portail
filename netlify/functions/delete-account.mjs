@@ -2,7 +2,7 @@
 // Réservé à l'administrateur. Droit à l'effacement (RGPD, article 17).
 import { json, serviceClient, authenticate } from '../lib/common.mjs';
 
-const BUCKETS = ['documents', 'photos'];
+const BUCKETS = ['documents', 'photos', 'files'];
 const CHUNK = 100;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const norm = (s) => String(s ?? '').trim().replace(/\s+/g, ' ').toLowerCase();

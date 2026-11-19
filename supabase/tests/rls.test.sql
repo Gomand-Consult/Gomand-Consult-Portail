@@ -152,10 +152,39 @@ select t.eq('effacer un client supprime ses documents', (select count(*) from pu
 select t.eq('effacer un client supprime ses galeries et photos', (select count(*) from public.galleries where client_id = '00000000-0000-0000-0000-0000000000c2') + (select count(*) from public.photos where id = '00000000-0000-0000-0000-0000000000f2'), 0);
 select t.eq('effacer un client supprime ses profils', (select count(*) from public.profiles where client_id = '00000000-0000-0000-0000-0000000000c2'), 0);
 
+-- 6b. Fichiers déposés
+select t.as_super();
+insert into auth.users (id, email) values ('00000000-0000-0000-0000-0000000000b3', 'marc@example.test');
+insert into public.clients (id, company) values ('00000000-0000-0000-0000-0000000000c3', 'Immo Test');
+insert into public.profiles (id, role, client_id, full_name, email) values
+  ('00000000-0000-0000-0000-0000000000b3', 'client', '00000000-0000-0000-0000-0000000000c3', 'Marc Test', 'marc@example.test');
+insert into public.files (client_id, lot, name, storage_path, mime, size_bytes) values
+  ('00000000-0000-0000-0000-0000000000c1', 'Lot 1', 'a.jpg', '00000000-0000-0000-0000-0000000000c1/x/a.jpg', 'image/jpeg', 10),
+  ('00000000-0000-0000-0000-0000000000c3', 'Lot 3', 'b.jpg', '00000000-0000-0000-0000-0000000000c3/x/b.jpg', 'image/jpeg', 10);
+insert into storage.objects (bucket_id, name) values
+  ('files', '00000000-0000-0000-0000-0000000000c1/x/a.jpg'),
+  ('files', '00000000-0000-0000-0000-0000000000c3/x/b.jpg');
+select t.as_user('00000000-0000-0000-0000-0000000000b3');
+select t.eq('client3 ne voit que ses fichiers', (select count(*) from public.files), 1);
+select t.eq('client3 ne voit que ses objets du compartiment files', (select count(*) from storage.objects where bucket_id = 'files'), 1);
+select t.fails('client3 ne peut pas déposer un fichier', $$insert into public.files (client_id, name, storage_path) values ('00000000-0000-0000-0000-0000000000c3', 'x', 'x')$$);
+select t.eq('client3 ne modifie aucun fichier (0 ligne)', t.affected($$update public.files set name = 'zz'$$), 0);
+select t.eq('client3 ne supprime aucun fichier (0 ligne)', t.affected($$delete from public.files$$), 0);
+select t.fails('client3 ne peut pas écrire dans le compartiment files', $$insert into storage.objects (bucket_id, name) values ('files', '00000000-0000-0000-0000-0000000000c3/y.jpg')$$);
+select t.as_super();
+select t.as_user('00000000-0000-0000-0000-0000000000a1');
+select t.eq('admin voit tous les fichiers', (select count(*) from public.files), 2);
+select t.eq('admin ajoute un fichier', t.affected($$insert into public.files (client_id, name, storage_path) values ('00000000-0000-0000-0000-0000000000c3', 'c.jpg', '00000000-0000-0000-0000-0000000000c3/x/c.jpg')$$), 1);
+select t.eq('admin supprime un fichier', t.affected($$delete from public.files where name = 'c.jpg'$$), 1);
+select t.as_super();
+delete from public.clients where id = '00000000-0000-0000-0000-0000000000c3';
+select t.eq('effacer un client supprime ses fichiers', (select count(*) from public.files where client_id = '00000000-0000-0000-0000-0000000000c3'), 0);
+
 -- 7. Anonyme : rien
 select t.as_super();
 select t.as_anon();
 select t.fails('anonyme ne lit pas les documents', $$select count(*) from public.documents$$);
+select t.fails('anonyme ne lit pas les fichiers', $$select count(*) from public.files$$);
 select t.fails('anonyme ne lit pas les profils',  $$select count(*) from public.profiles$$);
 select t.fails('anonyme ne peut pas appeler admin_pending', $$select * from public.admin_pending()$$);
 select t.eq('anonyme peut appeler ping', (select public.ping()), 1);

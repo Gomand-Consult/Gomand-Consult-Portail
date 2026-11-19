@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { getClient, listDocuments, listGalleries, listProfiles, createDocument, updateDocumentStatus, deleteDocument,
-  createGallery, deleteGallery, inviteClient, sendReset, notify, deleteClient, removeUser, exportClientData } from '../../lib/api';
+  createGallery, deleteGallery, listFiles, createFiles, deleteFiles, inviteClient, sendReset, notify, deleteClient, removeUser, exportClientData } from '../../lib/api';
 import { useToast } from '../../lib/toast';
 import { CATS, STATUS_PRESETS } from '../../config';
 import { fmtDate, plural } from '../../lib/format';
+import FilesSection, { fmtSize } from '../../components/FilesSection';
+import { MAX_FILE_MB } from '../../config';
 import { Shell, Loading, ErrorBox, ARROW_BACK } from '../../components/Layout';
 
 function DocumentForm({ clientId, onDone }) {
@@ -81,6 +83,40 @@ function GalleryForm({ clientId, onDone }) {
   );
 }
 
+function FilesForm({ clientId, onDone }) {
+  const toast = useToast();
+  const [f, setF] = useState({ lot: '', note: '', notify: true });
+  const [files, setFiles] = useState([]);
+  const [progress, setProgress] = useState(null);
+  const [error, setError] = useState('');
+  const total = files.reduce((n, x) => n + x.size, 0);
+  const submit = async (e) => {
+    e.preventDefault(); setError('');
+    if (!files.length) return setError('Choisissez au moins un fichier.');
+    setProgress([0, files.length]);
+    try {
+      const rows = await createFiles({ clientId, lot: f.lot.trim(), note: f.note.trim(), files, onProgress: (a, b) => setProgress([a, b]) });
+      if (f.notify && rows[0]) notify('files_published', rows[0].id);
+      toast(f.notify ? 'Fichiers déposés. Le client est prévenu par email.' : 'Fichiers déposés.');
+      setF({ ...f, lot: '', note: '' }); setFiles([]); e.target.reset(); onDone();
+    } catch (err) { setError(err.message); }
+    setProgress(null);
+  };
+  return (
+    <form className="add-form" onSubmit={submit} noValidate>
+      <div className="field"><label htmlFor="f-lot">Titre du dépôt</label><input id="f-lot" value={f.lot} onChange={(e) => setF({ ...f, lot: e.target.value })} placeholder="Photos de l’annonce, rue des Roses 12" /><span className="hint">Facultatif. Regroupe les fichiers envoyés ensemble.</span></div>
+      <div className="field"><label htmlFor="f-note">Message d’accompagnement</label><textarea id="f-note" rows="2" value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} /><span className="hint">Facultatif.</span></div>
+      <div className="field"><label htmlFor="f-files">Fichiers</label>
+        <input id="f-files" type="file" multiple onChange={(e) => setFiles(Array.from(e.target.files || []).slice(0, 200))} />
+        <span className="hint">{files.length ? `${plural(files.length, 'fichier sélectionné', 'fichiers sélectionnés')}, ${fmtSize(total)}.` : `Tous formats, ${MAX_FILE_MB} Mo maximum par fichier. Les fichiers sont conservés tels quels, sans recompression.`}</span></div>
+      <label className="check"><input type="checkbox" checked={f.notify} onChange={(e) => setF({ ...f, notify: e.target.checked })} /> Prévenir le client par email</label>
+      {progress && <div className="upload-progress" role="progressbar" aria-valuemin="0" aria-valuemax={progress[1]} aria-valuenow={progress[0]} aria-label="Envoi des fichiers"><span style={{ width: `${(progress[0] / progress[1]) * 100}%` }} /></div>}
+      <ErrorBox>{error}</ErrorBox>
+      <button className="btn btn-primary" type="submit" disabled={Boolean(progress)}>{progress ? `Envoi ${progress[0]} sur ${progress[1]}…` : 'Déposer les fichiers'}</button>
+    </form>
+  );
+}
+
 export default function AdminClient() {
   const { id } = useParams();
   const toast = useToast();
@@ -95,8 +131,8 @@ export default function AdminClient() {
 
   const load = useCallback(async () => {
     try {
-      const [client, docs, gals, people] = await Promise.all([getClient(id), listDocuments(id), listGalleries(id), listProfiles(id)]);
-      setData({ client, docs, gals, people });
+      const [client, docs, gals, people, files] = await Promise.all([getClient(id), listDocuments(id), listGalleries(id), listProfiles(id), listFiles(id)]);
+      setData({ client, docs, gals, people, files });
     } catch (e) { setError(e.message); }
   }, [id]);
   useEffect(() => { load(); }, [load]);
@@ -112,6 +148,9 @@ export default function AdminClient() {
   const removeGal = async (g) => {
     if (!window.confirm(`Supprimer définitivement la galerie « ${g.title} » et ses photos ?`)) return;
     try { await deleteGallery(g); toast('Galerie supprimée.'); load(); } catch (e) { toast(e.message); }
+  };
+  const removeFiles = async (list) => {
+    try { await deleteFiles(list); toast(list.length > 1 ? 'Dépôt supprimé.' : 'Fichier supprimé.'); load(); } catch (e) { toast(e.message); }
   };
   const dropUser = async (p) => {
     if (!window.confirm(`Retirer l’accès de ${p.full_name || p.email} ? Son compte et ses commentaires seront supprimés définitivement.`)) return;
@@ -144,7 +183,7 @@ export default function AdminClient() {
 
   if (error) return <Shell><div className="container"><ErrorBox>{error}</ErrorBox></div></Shell>;
   if (!data) return <Shell><Loading /></Shell>;
-  const { client, docs, gals, people } = data;
+  const { client, docs, gals, people, files } = data;
   if (!client) return <Shell><div className="container"><ErrorBox>Client introuvable.</ErrorBox></div></Shell>;
 
   return (
@@ -232,8 +271,15 @@ export default function AdminClient() {
         </section>
 
         <section className="cat section" style={{ marginTop: 24 }}>
+          <h2 className="cat-title">Fichiers à télécharger</h2>
+          {files.length === 0 ? <p className="empty">Aucun fichier. Déposez-en avec le formulaire ci-dessous.</p> : <FilesSection files={files} admin onDelete={removeFiles} />}
+          <h3 style={{ margin: '40px 0 16px' }}>Déposer des fichiers</h3>
+          <FilesForm clientId={id} onDone={load} />
+        </section>
+
+        <section className="cat section" style={{ marginTop: 24 }}>
           <h2 className="cat-title">Données et suppression</h2>
-          <p style={{ maxWidth: '60ch', marginBottom: 16 }}>Pour répondre à une demande d’accès ou de portabilité, exportez toutes les données de ce client. Les fichiers (PDF, photos) ne sont pas inclus : ils se récupèrent depuis leur lien.</p>
+          <p style={{ maxWidth: '60ch', marginBottom: 16 }}>Pour répondre à une demande d’accès ou de portabilité, exportez toutes les données de ce client. Les fichiers (PDF, photos, dépôts) ne sont pas inclus : ils se récupèrent depuis leur lien.</p>
           <p style={{ marginBottom: 40 }}><button className="btn btn-ghost" onClick={exportData}>Exporter les données (JSON)</button></p>
           <form className="danger-zone" onSubmit={eraseClient} noValidate>
             <h3>Supprimer ce client</h3>

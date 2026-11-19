@@ -32,7 +32,7 @@ Les intitulés des menus peuvent légèrement varier chez les fournisseurs.
 
 ### 2. Supabase
 1. Créez un projet. **Région : une région de l'Union européenne** (Francfort ou Irlande). Notez le mot de passe de la base dans votre gestionnaire de mots de passe.
-2. **SQL Editor** → nouvelle requête → collez tout le contenu de `supabase/schema.sql` → *Run*. Cela crée les tables, les règles de sécurité et les deux espaces de stockage privés (`documents`, `photos`).
+2. **SQL Editor** → nouvelle requête → collez tout le contenu de `supabase/schema.sql` → *Run*. Cela crée les tables, les règles de sécurité et les trois espaces de stockage privés (`documents`, `photos`, `files`).
    *Vous aviez déjà installé la première version ?* Exécutez seulement `supabase/migrations/002_rgpd.sql` (elle ajoute l'accusé de réception de la politique de confidentialité, sans toucher aux données existantes).
 3. **Authentication → Sign In / Providers** :
    - **désactivez « Allow new users to sign up »** (il ne doit pas y avoir d'inscription libre : c'est Anthony qui invite) ;
@@ -98,6 +98,7 @@ Le message nomme maintenant la variable manquante. Vérifiez dans Netlify (*Site
 - **Réponses** : l'écran d'accueil du back-office liste ce qui attend votre réponse. Un client qui oublie son mot de passe utilise « Mot de passe oublié » ; vous pouvez aussi lui renvoyer un lien depuis sa fiche.
 - **Aperçu** : « Voir l'espace comme le client » montre exactement ce que le client voit.
 - **Données d'un client (accès, portabilité)** : fiche client → *Données et suppression* → « Exporter les données (JSON) ».
+- **Fichiers à télécharger** : fiche client → *Déposer des fichiers* (jusqu'à 200 fichiers, 50 Mo chacun, tous formats). Contrairement aux galeries, les fichiers restent **intacts** (aucune recompression) : idéal pour les photos d'annonces en pleine qualité. Le client les voit dans son espace, par dépôt, avec miniatures, et peut tout télécharger en un `.zip` (jusqu'à 400 Mo par dépôt) ou fichier par fichier. Si vous mettez à jour un portail déjà installé, exécutez `supabase/migrations/005_fichiers.sql`.
 - **Supprimer un client** : même section → retapez le nom de l'entreprise → « Supprimer définitivement ». Fichiers, accès, documents, photos et échanges sont effacés ; c'est irréversible. « Retirer l'accès » (dans *Accès*) supprime une seule personne.
 
 ## Sécurité et RGPD

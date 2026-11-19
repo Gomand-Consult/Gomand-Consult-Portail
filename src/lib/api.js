@@ -1,7 +1,7 @@
 // Toutes les communications avec Supabase passent par ce fichier.
 import { supabase } from '../supabase';
 import { resizeToJpeg } from './images';
-import { MAX_PDF_MB, MAX_HTML_MB } from '../config';
+import { MAX_PDF_MB, MAX_HTML_MB, MAX_FILE_MB } from '../config';
 
 const ok = ({ data, error }) => {
   if (error) throw new Error(error.message || 'Une erreur est survenue.');
@@ -70,13 +70,14 @@ export const removeUser = (userId) => deleteAccount({ action: 'user', id: userId
 
 // Copie complète des données d'un client (droit d'accès et de portabilité). Les fichiers eux-mêmes ne sont pas inclus.
 export async function exportClientData(clientId) {
-  const [client, people, documents, galleries] = await Promise.all([
+  const [client, people, documents, galleries, files] = await Promise.all([
     supabase.from('clients').select('*').eq('id', clientId).maybeSingle().then(ok),
     supabase.from('profiles').select('full_name, email, created_at, privacy_accepted_at, privacy_version').eq('client_id', clientId).then(ok),
     supabase.from('documents').select('*, annotations(*, annotation_messages(*))').eq('client_id', clientId).then(ok),
     supabase.from('galleries').select('*, photos(*, photo_messages(*))').eq('client_id', clientId).then(ok),
+    supabase.from('files').select('lot, note, name, mime, size_bytes, created_at').eq('client_id', clientId).then(ok),
   ]);
-  return { exported_at: new Date().toISOString(), client, people, documents, galleries };
+  return { exported_at: new Date().toISOString(), client, people, documents, galleries, files };
 }
 
 // ------------------------------------------------------------ Documents ----
@@ -197,6 +198,56 @@ export async function deleteGallery(gallery) {
   const paths = photos.flatMap((p) => [p.storage_path, p.thumb_path]);
   if (paths.length) await supabase.storage.from('photos').remove(paths);
   ok(await supabase.from('galleries').delete().eq('id', gallery.id));
+}
+
+// -------------------------------------------------------------- Fichiers ----
+// Dépôt de fichiers téléchargeables tels quels (originaux, sans recompression).
+export const listFiles = async (clientId) =>
+  ok(await supabase.from('files').select('*').eq('client_id', clientId).order('created_at', { ascending: false }).order('name'));
+export async function fileUrl(path, downloadAs) {
+  const { data, error } = await supabase.storage.from('files').createSignedUrl(path, 3600, downloadAs ? { download: downloadAs } : undefined);
+  if (error) throw new Error('Le fichier est momentanément inaccessible.');
+  return data.signedUrl;
+}
+export const isImageFile = (f) => /^image\/(jpeg|png|webp|gif|avif)$/i.test(f?.mime || '') && !!f?.thumb_path;
+const extOf = (name) => { const m = /\.([A-Za-z0-9]{1,8})$/.exec(name || ''); return m ? m[1].toLowerCase() : 'bin'; };
+
+export async function createFiles({ clientId, lot, note, files, onProgress }) {
+  for (const f of files) {
+    if (f.size > MAX_FILE_MB * 1024 * 1024) throw new Error(`« ${f.name} » dépasse ${MAX_FILE_MB} Mo.`);
+    if (f.size === 0) throw new Error(`« ${f.name} » est vide.`);
+  }
+  const batch = uuid(), uploaded = [], rows = [];
+  try {
+    for (let i = 0; i < files.length; i++) {
+      const f = files[i];
+      const base = `${clientId}/${batch}/${uuid()}`;
+      const path = `${base}.${extOf(f.name)}`;
+      const up = await supabase.storage.from('files').upload(path, f, { contentType: f.type || 'application/octet-stream', upsert: false });
+      if (up.error) throw new Error(`L’envoi de « ${f.name} » a échoué.`);
+      uploaded.push(path);
+      let thumb_path = null;
+      if (/^image\/(jpeg|png|webp|gif|avif)$/i.test(f.type)) {
+        try {
+          const t = await resizeToJpeg(f, 600, 0.8);
+          const tp = `${base}_t.jpg`;
+          const r = await supabase.storage.from('files').upload(tp, t, { contentType: 'image/jpeg' });
+          if (!r.error) { uploaded.push(tp); thumb_path = tp; }
+        } catch { /* image illisible par le navigateur : pas de miniature, le fichier reste téléchargeable */ }
+      }
+      rows.push({ client_id: clientId, lot: lot || null, note: note || null, name: f.name.slice(0, 255), storage_path: path, thumb_path, mime: f.type || null, size_bytes: f.size });
+      onProgress?.(i + 1, files.length);
+    }
+    return ok(await supabase.from('files').insert(rows).select());
+  } catch (e) {
+    if (uploaded.length) await supabase.storage.from('files').remove(uploaded);
+    throw e;
+  }
+}
+export async function deleteFiles(list) {
+  const paths = list.flatMap((f) => [f.storage_path, f.thumb_path]).filter(Boolean);
+  if (paths.length) await supabase.storage.from('files').remove(paths);
+  ok(await supabase.from('files').delete().in('id', list.map((f) => f.id)));
 }
 
 // ------------------------------------------------------------ Back-office ----

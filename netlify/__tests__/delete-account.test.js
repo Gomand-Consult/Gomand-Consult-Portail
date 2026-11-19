@@ -11,6 +11,7 @@ function fakeSb({ role = 'admin', failStorage = false, failUser = false } = {}) 
   const log = [];
   const files = {
     documents: { [CLIENT_ID]: [{ name: 'a.pdf', id: 'x' }] },
+    files: { [CLIENT_ID]: [{ name: 'b1', id: null }], [`${CLIENT_ID}/b1`]: [{ name: 'f.jpg', id: 'w' }] },
     photos: { [CLIENT_ID]: [{ name: 'g1', id: null }], [`${CLIENT_ID}/g1`]: [{ name: 'p.jpg', id: 'y' }, { name: 'p_t.jpg', id: 'z' }] },
   };
   const table = (name) => ({
@@ -56,7 +57,7 @@ describe('delete-account', () => {
     const sb = fakeSb();
     const res = await handle(req({ action: 'client', id: CLIENT_ID, confirm: '  maison   LAMBERT ' }), sb);
     expect(res.status).toBe(200);
-    expect(sb.log).toEqual(['storage:documents:1', 'storage:photos:2', `auth:delete:${USER_ID}`, 'db:delete:clients']);
+    expect(sb.log).toEqual(['storage:documents:1', 'storage:photos:2', 'storage:files:1', `auth:delete:${USER_ID}`, 'db:delete:clients']);
   });
   it('s’arrête avant de toucher aux comptes si les fichiers ne peuvent pas être supprimés', async () => {
     const sb = fakeSb({ failStorage: true });

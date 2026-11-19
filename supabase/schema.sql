@@ -99,6 +99,21 @@ create table public.photos (
 );
 create index photos_gallery_idx on public.photos (gallery_id, position);
 
+create table public.files (
+  id           uuid primary key default gen_random_uuid(),
+  client_id    uuid not null references public.clients (id) on delete cascade,
+  lot          text check (char_length(lot) <= 200),
+  note         text check (char_length(note) <= 2000),
+  name         text not null check (char_length(name) between 1 and 255),
+  storage_path text not null,
+  thumb_path   text,                                     -- miniature JPEG (images uniquement)
+  mime         text,
+  size_bytes   bigint not null default 0 check (size_bytes >= 0),
+  created_at   timestamptz not null default now(),
+  notified_at  timestamptz
+);
+create index files_client_idx on public.files (client_id, created_at desc);
+
 create table public.photo_messages (
   id          uuid primary key default gen_random_uuid(),
   photo_id    uuid not null references public.photos (id) on delete cascade,
@@ -197,6 +212,7 @@ alter table public.annotation_messages enable row level security;
 alter table public.galleries           enable row level security;
 alter table public.photos              enable row level security;
 alter table public.photo_messages      enable row level security;
+alter table public.files               enable row level security;
 
 -- clients
 create policy clients_select on public.clients for select to authenticated using (public.can_access_client(id));
@@ -241,6 +257,11 @@ create policy photos_admin_update on public.photos for update to authenticated u
 create policy photos_admin_delete on public.photos for delete to authenticated using (public.is_admin());
 
 -- messages de photo
+create policy files_select       on public.files for select to authenticated using (public.can_access_client(client_id));
+create policy files_admin_insert on public.files for insert to authenticated with check (public.is_admin());
+create policy files_admin_update on public.files for update to authenticated using (public.is_admin()) with check (public.is_admin());
+create policy files_admin_delete on public.files for delete to authenticated using (public.is_admin());
+
 create policy photo_messages_select on public.photo_messages for select to authenticated using (public.can_access_photo(photo_id));
 create policy photo_messages_insert on public.photo_messages for insert to authenticated
   with check (author_id = (select auth.uid()) and public.can_access_photo(photo_id));
@@ -251,7 +272,7 @@ create policy photo_messages_delete on public.photo_messages for delete to authe
 -- colonne empêchent un client de modifier autre chose que ce qui est prévu.
 
 revoke all on public.clients, public.profiles, public.documents, public.annotations,
-              public.annotation_messages, public.galleries, public.photos, public.photo_messages
+              public.annotation_messages, public.galleries, public.photos, public.photo_messages, public.files
   from anon, authenticated;
 
 grant select, insert, update, delete on public.clients   to authenticated;
@@ -269,6 +290,8 @@ grant delete                         on public.annotation_messages to authentica
 
 grant select, insert, update, delete on public.galleries to authenticated;
 grant select, insert, update, delete on public.photos    to authenticated;
+grant select, insert, update, delete on public.files     to authenticated;
+grant select, insert, update, delete on public.files     to service_role;
 
 grant select                         on public.photo_messages to authenticated;
 grant insert (photo_id, body)        on public.photo_messages to authenticated;
@@ -361,19 +384,20 @@ create index if not exists photo_messages_author_idx on public.photo_messages (a
 
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types) values
   ('documents', 'documents', false, 52428800, array['application/pdf', 'text/html']),
-  ('photos',    'photos',    false, 15728640, array['image/jpeg'])
+  ('photos',    'photos',    false, 15728640, array['image/jpeg']),
+  ('files',     'files',     false, 52428800, null)
 on conflict (id) do update
   set public = false, file_size_limit = excluded.file_size_limit, allowed_mime_types = excluded.allowed_mime_types;
 
 -- Chemin attendu : <client_id>/<fichier>. Le premier dossier désigne l'entreprise.
 create policy portail_lecture on storage.objects for select to authenticated
-  using (bucket_id in ('documents', 'photos')
+  using (bucket_id in ('documents', 'photos', 'files')
          and (public.is_admin() or (storage.foldername(name))[1] = public.my_client_id()::text));
 create policy portail_ecriture_admin on storage.objects for insert to authenticated
-  with check (bucket_id in ('documents', 'photos') and public.is_admin());
+  with check (bucket_id in ('documents', 'photos', 'files') and public.is_admin());
 create policy portail_maj_admin on storage.objects for update to authenticated
-  using (bucket_id in ('documents', 'photos') and public.is_admin());
+  using (bucket_id in ('documents', 'photos', 'files') and public.is_admin());
 create policy portail_suppression_admin on storage.objects for delete to authenticated
-  using (bucket_id in ('documents', 'photos') and public.is_admin());
+  using (bucket_id in ('documents', 'photos', 'files') and public.is_admin());
 
 commit;

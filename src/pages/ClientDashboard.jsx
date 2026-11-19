@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
-import { getClient, listDocuments, listGalleries, documentUrl } from '../lib/api';
+import { getClient, listDocuments, listGalleries, listFiles, documentUrl } from '../lib/api';
+import FilesSection from '../components/FilesSection';
 import { useToast } from '../lib/toast';
 import { CATS } from '../config';
 import { fmtDate, plural } from '../lib/format';
@@ -24,8 +25,8 @@ export default function ClientDashboard({ clientId, preview = false }) {
   useEffect(() => {
     let alive = true;
     setData(null); setError('');
-    Promise.all([getClient(clientId), listDocuments(clientId), listGalleries(clientId)])
-      .then(([client, docs, gals]) => alive && setData({ client, docs, gals }))
+    Promise.all([getClient(clientId), listDocuments(clientId), listGalleries(clientId), listFiles(clientId)])
+      .then(([client, docs, gals, files]) => alive && setData({ client, docs, gals, files }))
       .catch((e) => alive && setError(e.message));
     return () => { alive = false; };
   }, [clientId]);
@@ -36,7 +37,7 @@ export default function ClientDashboard({ clientId, preview = false }) {
 
   if (error) return <Shell><div className="container"><ErrorBox>{error}</ErrorBox></div></Shell>;
   if (!data) return <Shell><Loading /></Shell>;
-  const { client, docs, gals } = data;
+  const { client, docs, gals, files } = data;
   if (!client) return <Shell><div className="container"><ErrorBox>Cet espace client est introuvable.</ErrorBox></div></Shell>;
 
   const firstName = (profile?.full_name || client.contact_name || '').split(' ')[0];
@@ -101,6 +102,13 @@ export default function ClientDashboard({ clientId, preview = false }) {
             </section>
           )}
 
+          {files.length > 0 && (
+            <section className="cat" id="fichiers" style={{ marginBottom: 40 }}>
+              <h2 className="cat-title" style={{ marginBottom: 16 }}>Fichiers à télécharger</h2>
+              <FilesSection files={files} />
+            </section>
+          )}
+
           {CATS.map(([key, label]) => {
             const list = docs.filter((d) => d.category === key);
             if (!list.length) return null;
@@ -130,7 +138,7 @@ export default function ClientDashboard({ clientId, preview = false }) {
               </section>
             );
           })}
-          {!docs.length && !gals.length && <p className="empty">Aucun document pour l’instant. Vous serez prévenu par email dès qu’Anthony en ajoute un.</p>}
+          {!docs.length && !gals.length && !files.length && <p className="empty">Aucun document pour l’instant. Vous serez prévenu par email dès qu’Anthony en ajoute un.</p>}
         </div>
       </div>
       {!preview && <ContactBand name={profile?.full_name} company={client.company} />}
